@@ -1,0 +1,5 @@
+obsmage (0.0.1) unstable; urgency=low
+
+  * First package of the add-on: obsmage-core plugin, omg-atoms, omg-compose, omg-heal.
+
+ -- Corwin Brust <corwin@bru.st>  Sun, 01 Nov 2026 12:00:00 -0600

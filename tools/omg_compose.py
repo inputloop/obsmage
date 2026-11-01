@@ -132,6 +132,14 @@ def enumerate_windows():
     import ctypes
     from ctypes import wintypes
     user32 = ctypes.windll.user32
+    # Without this, Windows hands a scaled-display process virtualised (smaller) sizes.
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
     class MONITORINFOEXW(ctypes.Structure):
         _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
@@ -156,6 +164,15 @@ def enumerate_windows():
                           mi.rcMonitor.bottom - mi.rcMonitor.top, bool(mi.dwFlags & 1)))
         return True
 
+    # explicit types: a 32-bit Python 3.8 and a 64-bit one both pass handles correctly
+    user32.EnumDisplayMonitors.argtypes = [wintypes.HDC, ctypes.POINTER(wintypes.RECT), PROTO,
+                                           wintypes.LPARAM]
+    user32.EnumDisplayMonitors.restype = wintypes.BOOL
+    user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.c_void_p]
+    user32.GetMonitorInfoW.restype = wintypes.BOOL
+    user32.EnumDisplayDevicesW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p,
+                                           wintypes.DWORD]
+    user32.EnumDisplayDevicesW.restype = wintypes.BOOL
     user32.EnumDisplayMonitors(None, None, PROTO(cb), 0)
     out = []
     for dev, x, y, w, h, prim in found:
@@ -614,7 +631,8 @@ def parse_canvas(s):
 
 
 def dump_json(col, path):
-    with open(path, "w", encoding="utf-8") as f:
+    # newline="\n": on Windows text mode would write CRLF; OBS writes LF
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(col, f, indent=4, ensure_ascii=False)
         f.write("\n")
 
@@ -625,6 +643,8 @@ def build_parser():
     a = sub.add_parser("displays", help="report current display geometry as JSON")
     a.add_argument("--from", dest="from_file", help="JSON file of displays")
     a.add_argument("--from-xrandr", help="text of `xrandr --listmonitors` or `--query`")
+    a.add_argument("--out", help="write the JSON here (UTF-8, LF) instead of printing; use this "
+                                 "on Windows, where PowerShell's > writes UTF-16")
     b = sub.add_parser("audit", help="how each display-capture source binds")
     b.add_argument("collection")
     b.add_argument("--displays", help="displays JSON; also resolves each source")
@@ -646,7 +666,18 @@ def build_parser():
     return p
 
 
+def _utf8_streams():
+    """Windows consoles and redirects default to a legacy code page (cp1252); a source name with
+    a character outside it would crash a print. Say UTF-8, and never crash on a stray character."""
+    for st in (sys.stdout, sys.stderr):
+        try:
+            st.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None):
+    _utf8_streams()
     args = build_parser().parse_args(argv)
     try:
         if args.cmd == "displays":
@@ -657,7 +688,12 @@ def main(argv=None):
                     ds = parse_xrandr(f.read())
             else:
                 ds = detect_displays()
-            print(json.dumps(ds, indent=2))
+            if args.out:
+                with open(args.out, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(json.dumps(ds, indent=2) + "\n")
+                print("Wrote %s (%d display(s))" % (args.out, len(ds)))
+            else:
+                print(json.dumps(ds, indent=2))
         elif args.cmd == "audit":
             ds = load_displays_file(args.displays) if args.displays else None
             res = audit(load_collection(args.collection), ds)

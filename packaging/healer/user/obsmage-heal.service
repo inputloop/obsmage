@@ -1,0 +1,20 @@
+[Unit]
+Description=obsmage build-and-heal (omg-heal heal), as an ordinary user
+Documentation=file://%h/.local/share/doc/obsmage/PACKAGING.md
+After=network-online.target
+ConditionPathExists=%h/.config/obsmage/heal.conf
+
+[Service]
+Type=oneshot
+# omg-heal wherever you put it; heal.conf sets WORK (for example %h/obsmage-heal) and SRC.
+ExecStart=%h/.local/lib/obsmage/omg-heal --conf %h/.config/obsmage/heal.conf heal
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=4h
+NoNewPrivileges=yes
+UMask=0027
+# Not the system unit's hardening on purpose: a user manager may not allow the sandbox options,
+# and a build needs the user's own compilers and tree. Build dependencies must already be installed.
+
+# Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later
+# Mentat (for Corwin, claude-sonnet-5-5)

@@ -1,0 +1,15 @@
+[Unit]
+Description=Run the obsmage build-and-heal check daily and shortly after login
+
+[Timer]
+OnBootSec=10min
+OnCalendar=daily
+RandomizedDelaySec=30min
+Persistent=true
+Unit=obsmage-heal.service
+
+[Install]
+WantedBy=timers.target
+
+# Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later
+# Mentat (for Corwin, claude-sonnet-5-5)

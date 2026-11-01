@@ -1,0 +1,10 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: obsmage
+Source: https://github.com/inputloop/obsmage
+
+Files: *
+Copyright: 2026 INPUTLOOP
+License: GPL-3+ or LGPL-3+
+ Code is GPL-3.0-or-later OR LGPL-3.0-or-later; prose is CC-BY-SA-4.0.
+ On Debian systems the full texts are in /usr/share/common-licenses/GPL-3 and
+ /usr/share/common-licenses/LGPL-3.

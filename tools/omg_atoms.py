@@ -77,9 +77,14 @@ def split_ini(data):
     """bytes -> (meta, shape lines, {set: [(key, value)]})"""
     bom = data.startswith(b'\xef\xbb\xbf')
     text = data[3:].decode('utf-8') if bom else data.decode('utf-8')
-    crlf = '\r\n' in text
-    lines = text.split('\r\n' if crlf else '\n')
-    trailing = lines and lines[-1] == ''
+    # Line endings: OBS sometimes appends a CRLF line to an LF file (seen on Avalon), so a file
+    # can mix them. 'crlf' says every ending is CRLF; 'eols' (only when mixed) lists each line's
+    # ending, N for LF, C for CRLF, for the last line too (N when it has none).
+    parts = re.split(r'(\r\n|\n)', text)
+    lines, ends = parts[0::2], [('C' if e == '\r\n' else 'N') for e in parts[1::2]]
+    crlf = bool(ends) and all(e == 'C' for e in ends)
+    mixed = 'C' in ends and 'N' in ends
+    trailing = lines[-1] == ''
     if trailing:
         lines = lines[:-1]
     shape, sets, cur = [], {}, '_head'
@@ -96,6 +101,8 @@ def split_ini(data):
         else:
             shape.append('R ' + ln)
     meta = {'bom': bom, 'crlf': crlf, 'trailing': trailing}
+    if mixed:
+        meta['eols'] = ''.join(ends)
     return meta, shape, sets
 
 def join_ini(meta, shape, sets):
@@ -113,8 +120,13 @@ def join_ini(meta, shape, sets):
             pos[(cur, k)] = idx + 1
         else:
             out.append(rest)
-    nl = '\r\n' if meta['crlf'] else '\n'
-    text = nl.join(out) + (nl if meta['trailing'] else '')
+    if meta.get('eols'):
+        e = meta['eols']
+        text = ''.join(l + (('\r\n' if e[i] == 'C' else '\n') if i < len(e) else '')
+                       for i, l in enumerate(out))
+    else:
+        nl = '\r\n' if meta['crlf'] else '\n'
+        text = nl.join(out) + (nl if meta['trailing'] else '')
     data = text.encode('utf-8')
     return (b'\xef\xbb\xbf' + data) if meta['bom'] else data
 
@@ -208,6 +220,11 @@ def config_files(root):
             if f.endswith(('.ini', '.json')) and not f.endswith('.bak'):
                 yield os.path.relpath(os.path.join(dirpath, f), root).replace(os.sep, '/')
 
+def read_text(path):
+    """UTF-8, newlines untouched (text mode would turn a lone CR in a value into LF)."""
+    with open(path, encoding='utf-8', newline='') as fh:
+        return fh.read()
+
 def write_text(path, text):
     if os.path.dirname(path):  # a bare file name means the current directory
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -217,7 +234,7 @@ def write_text(path, text):
 def load_vault(path):
     v = {}
     if path and os.path.exists(path):
-        for k, val, _ in parse_kv(open(path, encoding='utf-8').read()):
+        for k, val, _ in parse_kv(read_text(path)):
             v[k] = val
     return v
 
@@ -238,7 +255,7 @@ def read_store(atoms):
             if f.endswith('.kv'):
                 p = os.path.join(dirpath, f)
                 rel = os.path.relpath(p, atoms).replace(os.sep, '/')[:-3]
-                for k, v, _ in parse_kv(open(p, encoding='utf-8').read()):
+                for k, v, _ in parse_kv(read_text(p)):
                     out[rel + '|' + k] = v
     return out
 
@@ -280,7 +297,9 @@ def split(config, atoms, vault_path=None, ledger=None):
             try:
                 obj = json.loads(data.decode('utf-8-sig'))
             except ValueError:
-                write_text(os.path.join(base, '_raw'), data.decode('utf-8', 'replace'))
+                os.makedirs(base, exist_ok=True)
+                with open(os.path.join(base, '_raw'), 'wb') as fh:  # bytes, so nothing is lost
+                    fh.write(data)
                 continue
             sets = json_sets(obj)
             for sname, pairs in sets.items():
@@ -305,19 +324,25 @@ def join(atoms, out, vault_path=None):
     vault = load_vault(vault_path)
     missing = []
     for dirpath, dirs, files in os.walk(atoms):
+        if '_raw' in files:  # a .json that is not one JSON document (e.g. JSON lines): kept byte for byte
+            dest = os.path.join(out, os.path.relpath(dirpath, atoms))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(os.path.join(dirpath, '_raw'), 'rb') as fh, open(dest, 'wb') as oh:
+                oh.write(fh.read())
+            continue
         if '_sets' not in files:
             continue
         rel = os.path.relpath(dirpath, atoms).replace(os.sep, '/')
-        order = [s for s in open(os.path.join(dirpath, '_sets'), encoding='utf-8').read().split('\n') if s]
+        order = [s for s in read_text(os.path.join(dirpath, '_sets')).split('\n') if s]
         dest = os.path.join(out, rel)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         if rel.endswith('.ini'):
-            sh = open(os.path.join(dirpath, '_shape'), encoding='utf-8').read().split('\n')
+            sh = read_text(os.path.join(dirpath, '_shape')).split('\n')
             meta, shape = json.loads(sh[0]), [s for s in sh[1:] if s]
             sets = {}
             for sname in order:
                 pairs = []
-                for k, v, _ in parse_kv(open(os.path.join(dirpath, safe_set(sname) + '.kv'), encoding='utf-8').read()):
+                for k, v, _ in parse_kv(read_text(os.path.join(dirpath, safe_set(sname) + '.kv'))):
                     if PLACEHOLDER.match(v):
                         key = f'{rel}|{sname}|{k}'
                         if key not in vault:
@@ -330,7 +355,7 @@ def join(atoms, out, vault_path=None):
         else:
             pairs = []
             for sname in order:
-                for k, v, _ in parse_kv(open(os.path.join(dirpath, sname + '.kv'), encoding='utf-8').read()):
+                for k, v, _ in parse_kv(read_text(os.path.join(dirpath, sname + '.kv'))):
                     if v.startswith('"@secret(len='):
                         key = f'{rel}|{sname}|{k}'
                         if key not in vault:
@@ -339,8 +364,6 @@ def join(atoms, out, vault_path=None):
                     pairs.append((k, v))
             if not missing:
                 open(dest, 'wb').write(dump_obs_json(unflatten(pairs)))
-        if '_raw' in files:
-            open(dest, 'wb').write(open(os.path.join(dirpath, '_raw'), 'rb').read())
     return missing
 
 
@@ -370,7 +393,7 @@ def verify(config):
         leaks = []
         for dirpath, _, files in os.walk(atoms):
             for f in files:
-                text = open(os.path.join(dirpath, f), encoding='utf-8').read()
+                text = read_text(os.path.join(dirpath, f))
                 leaks += [f for v in vals if len(v) >= 6 and v in text]
     return bad, missing, leaks
 
@@ -395,20 +418,20 @@ def rollup(atoms, stages):
     for rel in sorted(stages_seen):
         out += [f'## {rel}', '']
         for f in sorted(stages_seen[rel]):
-            body = open(os.path.join(atoms, rel, f), encoding='utf-8').read().rstrip('\n')
+            body = read_text(os.path.join(atoms, rel, f)).rstrip('\n')
             out += [f'```kv set={rel}/{f}', body, '```', '']
     write_text(stages, '\n'.join(out) + '\n')
     return pin
 
 def unroll(stages, atoms):
-    text = open(stages, encoding='utf-8').read()
+    text = read_text(stages)
     m = re.search(r'<!-- omg:pin ([0-9a-f]{64}) -->', text)
     if not m:
         return ['no pin in ' + stages]
     blocks = {b.group(1): b.group(2) for b in re.finditer(r'```kv set=(\S+)\n(.*?)\n```', text, re.S)}
     changed = {s: body for s, body in blocks.items()
                if not os.path.exists(os.path.join(atoms, s))
-               or open(os.path.join(atoms, s), encoding='utf-8').read().rstrip('\n') != body}
+               or read_text(os.path.join(atoms, s)).rstrip('\n') != body}
     if not changed:
         return []
     if store_hash(atoms) != m.group(1):
@@ -428,7 +451,7 @@ def record_changes(ledger, before, after):
     p = os.path.join(ledger, 'events.tsv')
     seq = len({l.split('\t', 1)[0] for l in open(p, encoding='utf-8')}) if os.path.exists(p) else 0
     ev = time.strftime('%Y-%m-%dT%H:%M:%S') + f'.{seq:06d}'  # unique even within one second
-    with open(p, 'a', encoding='utf-8') as fh:
+    with open(p, 'a', encoding='utf-8', newline='\n') as fh:
         for k in changed:
             fh.write(f'{ev}\t{k}\n')
     return len(changed)
@@ -465,6 +488,9 @@ def candidates():
 
 
 def main(argv=None):
+    for st in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252; never crash on a name
+        try: st.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, ValueError): pass
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
     sub.add_parser('find')

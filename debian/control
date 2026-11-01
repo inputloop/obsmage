@@ -1,0 +1,22 @@
+Source: obsmage
+Section: video
+Priority: optional
+Maintainer: Corwin Brust <corwin@bru.st>
+Build-Depends: debhelper-compat (= 13), cmake, pkg-config, libobs-dev, python3, git, xz-utils
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://github.com/inputloop/obsmage
+
+Package: obsmage
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, python3
+Recommends: obs-studio
+Description: OBS Studio kept as a living, literate configuration (add-on package)
+ obsmage wraps the whole OBS configuration in a key/value atom layer so every
+ setting can be read, diffed and versioned, with credentials kept out of
+ everything published. This package holds the command line tools (omg-atoms,
+ omg-compose), the build healer, and the obsmage-core plugin for an OBS Studio
+ installed from the distribution.
+ .
+ It touches nothing outside /usr and has no configuration files, so removing it
+ removes all of it. It never writes your OBS files unless you ask.

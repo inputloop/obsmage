@@ -12,6 +12,7 @@ target_link_libraries(obsmage-core PRIVATE OBS::libobs OBS::obs-frontend-api)
 set_target_properties(obsmage-core PROPERTIES PREFIX "")
 
 install(TARGETS obsmage-core LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/obs-plugins")
+install(DIRECTORY data/ DESTINATION "share/obs/obs-plugins/obsmage-core")
 
 # Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later.
 # Mentat (for Corwin; claude-opus-5-5)
