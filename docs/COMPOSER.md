@@ -27,7 +27,7 @@ every hide.
 ## Commands
 
 ```
-omg_compose.py displays [--from FILE | --from-xrandr FILE]
+omg_compose.py displays [--from FILE | --from-xrandr FILE] [--out FILE]
 omg_compose.py audit COLLECTION [--displays FILE] [--json]
 omg_compose.py compose COLLECTION --displays FILE [--scene NAME ...] [--canvas WxH]
                        [--margin N] [--relayout] [--source-type TYPE] [--out FILE | --write]
@@ -72,6 +72,10 @@ with one uniform scale, centred, keeping relative physical layout and aspect. Ex
 present displays keep their hand-placed position and scale unless `--relayout`. New sources and items
 get fresh uuid4 values and item ids (max existing id or `id_counter`, plus 1); fields such as
 `pos_rel` and `source_uuid` are written only if the file already uses them.
+
+On Windows write the list with `displays --out FILE`: PowerShell's `>` saves UTF-16, which the
+other commands do not read. The Windows reading marks the process DPI-aware first, so sizes are
+real pixels on a scaled display. A Python 3.8 (32-bit) is enough.
 
 ## Limits
 

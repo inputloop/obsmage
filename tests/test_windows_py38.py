@@ -129,5 +129,42 @@ class MixedLineEndings(unittest.TestCase):
         self.assertEqual(self.roundtrip(raw), raw)
 
 
+class WindowsVaultLock(unittest.TestCase):
+    """On Windows the vault is locked to its owner with icacls (no mode bits there)."""
+
+    def test_vault_gets_an_owner_only_acl(self):
+        from unittest import mock
+        sys.path.insert(0, TOOLS)
+        import omg_atoms as oa
+        calls = []
+
+        def fake_run(argv, **kw):
+            calls.append(argv)
+            return mock.Mock(returncode=0)
+        tmp = tempfile.mkdtemp()
+        env = dict(os.environ, USERNAME="corwi")
+        with mock.patch.object(oa, "IS_WINDOWS", not RED), mock.patch("subprocess.run", fake_run), \
+                mock.patch.dict(os.environ, env):
+            oa.save_vault(os.path.join(tmp, "v.kv"), {"a|b|c": "x"})
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], "icacls")
+        self.assertIn("/inheritance:r", calls[0])
+        self.assertIn("corwi:F", calls[0])
+
+    def test_failure_warns_and_does_not_crash(self):
+        from unittest import mock
+        sys.path.insert(0, TOOLS)
+        import omg_atoms as oa
+        tmp = tempfile.mkdtemp()
+        with mock.patch.object(oa, "IS_WINDOWS", True), \
+                mock.patch("subprocess.run", side_effect=OSError("no icacls")):
+            import io
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                oa.save_vault(os.path.join(tmp, "v.kv"), {"a|b|c": "x"})
+        self.assertIn("could not restrict", err.getvalue())
+        self.assertTrue(os.path.exists(os.path.join(tmp, "v.kv")))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -238,11 +238,32 @@ def load_vault(path):
             v[k] = val
     return v
 
+IS_WINDOWS = os.name == 'nt'
+
+def lock_file_to_owner(path):
+    """Windows ignores the 0o600 in os.open, so say it with an ACL: drop inherited rights and
+    grant the current user alone. Returns True when icacls reported success; otherwise warns
+    (on stderr, once per call) and the vault keeps whatever its folder's rights give it."""
+    import subprocess
+    user = os.environ.get('USERNAME') or os.environ.get('USER') or ''
+    try:
+        r = subprocess.run(['icacls', path, '/inheritance:r', '/grant:r', user + ':F'],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if user and r.returncode == 0:
+            return True
+    except OSError:
+        pass
+    sys.stderr.write('warning: could not restrict %s to its owner (icacls failed); its folder\'s '
+                     'rights apply. Keep the vault out of shared folders.\n' % path)
+    return False
+
 def save_vault(path, vault):
     if not path or not vault:
         return
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    if IS_WINDOWS:  # lock it while it is still empty, then write the secrets
+        lock_file_to_owner(path)
     with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as fh:
         for k in sorted(vault):
             fh.write(kv_line(k, vault[k], False) + '\n')

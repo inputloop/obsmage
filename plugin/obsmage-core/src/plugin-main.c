@@ -8,9 +8,9 @@
  * On OBS_FRONTEND_EVENT_FINISHED_LOADING it audits display bindings, logs what it found and
  * changes nothing; composing is always the person's choice.
  *
- * STATUS: skeleton. Built 2026-11-01 on gw33 (Ubuntu 26.04, libobs-dev): cmake configures, the
- * module compiles and links (obsmage-core.so). Not yet loaded in a running OBS. Treat every
- * behaviour beyond logging as TODO.
+ * STATUS: skeleton. Built 2026-11-01 on gw33 (Ubuntu 26.04, libobs-dev) and loaded in OBS Studio
+ * 32.1.0 under xvfb (see docs/REQUIREMENTS.md for the log lines). Treat every behaviour beyond
+ * logging as TODO.
  */
 #include <obs-module.h>
 #include <obs-frontend-api.h>

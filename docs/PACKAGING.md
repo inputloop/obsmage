@@ -76,6 +76,17 @@ Under `WORK` (for the service, `/var/lib/obsmage-heal`):
 build failed, the followed ref moved, or `BUILD` changed; otherwise it logs `uptodate`. Its exit
 code is the build's, so a failing run shows as a failed systemd unit.
 
+## The add-on package and the user timer
+
+`debian/` at the repository root builds one package, `obsmage`: the `obsmage-core` plugin, the two
+tools (`omg-atoms`, `omg-compose`) and the healer with its units. It needs OBS Studio only at run
+time and touches nothing outside `/usr`, so `apt remove obsmage` removes all of it. Point `SRC` at
+this repository and the healer builds it (it uses the tree's own `debian/`; the `DEBIAN` overlay is
+only for an upstream tree that has none). Tests run inside the build.
+
+`packaging/healer/user/` holds the same service and timer for one user without root
+(`systemctl --user`); `NOTES.md` has the install lines and the undo. It is what runs on gw33.
+
 ## Limits
 
 The healer packages but does not install build dependencies, sign packages, or publish them.

@@ -18,7 +18,7 @@ On top of that sit plugins, each of which also installs into an upstream OBS you
 ## What is designed, not built
 
 AR desktop control (magic hand, flick to fill, magic wand, wall grab) and camera calibration:
-[`docs/AR-CONTROL.md`](docs/AR-CONTROL.md). The core plugin skeleton is in `plugin/obsmage-core`; it compiles against Ubuntu's libobs (checked on gw33), and is not yet loaded in OBS.
+[`docs/AR-CONTROL.md`](docs/AR-CONTROL.md). The core plugin skeleton is in `plugin/obsmage-core`; it compiles against Ubuntu's libobs and loads in OBS Studio 32.1.0 on gw33 (log lines in `docs/REQUIREMENTS.md`); its menu entries only log for now.
 Full status table: [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md).
 
 ## Try it
@@ -41,7 +41,12 @@ python3 -m unittest discover -s tests          # Python unit tests
 sh tests/e2e.sh                                 # POSIX sh end-to-end, against tests/SPEC.txt
 sh tests/e2e.sh --prove-red                     # shows the suite can fail
 sh tests/e2e-healer.sh
+sh tests/e2e-packaging.sh                       # debian/ and the user-mode healer units
+python3 -m unittest tests/test_windows_py38.py  # Windows / Python 3.8 cases
 ```
+
+Each shell suite takes `--prove-red` (the healer's: `HEAL_PROVE_RED=1`); the Python tests take
+`OMG_PROVE_RED=1`. All of it runs on Python 3.8 (Avalon's Windows Python).
 
 ## How this tree is kept
 

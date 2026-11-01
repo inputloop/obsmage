@@ -38,7 +38,8 @@ class Atoms(unittest.TestCase):
             published += 'FAKEFAKEFAKEtoken0000'
         for secret in ('FAKEFAKEFAKEtoken0000', 'FAKEsecretFAKEsecret==', 'live_FAKE_stream_key_123456'):
             self.assertNotIn(secret, published)
-        self.assertEqual(os.stat(self.vault).st_mode & 0o777, 0o600)
+        if os.name != 'nt':  # Windows has no mode bits; see test_windows_py38 for the ACL path
+            self.assertEqual(os.stat(self.vault).st_mode & 0o777, 0o600)
 
     def test_join_refuses_without_vault(self):
         A.split(FIX, self.atoms, self.vault)
