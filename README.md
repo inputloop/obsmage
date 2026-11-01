@@ -18,7 +18,7 @@ On top of that sit plugins, each of which also installs into an upstream OBS you
 ## What is designed, not built
 
 AR desktop control (magic hand, flick to fill, magic wand, wall grab) and camera calibration:
-[`docs/AR-CONTROL.md`](docs/AR-CONTROL.md). The core plugin skeleton is in `plugin/obsmage-core`.
+[`docs/AR-CONTROL.md`](docs/AR-CONTROL.md). The core plugin skeleton is in `plugin/obsmage-core`; it compiles against Ubuntu's libobs (checked on gw33), and is not yet loaded in OBS.
 Full status table: [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md).
 
 ## Try it

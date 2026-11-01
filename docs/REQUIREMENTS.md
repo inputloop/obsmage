@@ -8,7 +8,7 @@ in this tree. **Designed** means a document says how. **Open** means neither yet
 | R1 | A bespoke multiplatform OBS (Linux, Windows, macOS) | Designed | `docs/PACKAGING.md` |
 | R2 | Distribution packaging first. Carry our patches in-tree against upstream versions; prefer what upstream already does well; offer patches upstream when ready, while still using our own copy | Designed | `docs/PACKAGING.md`, `packaging/` |
 | R3 | A literate taxonomy over OBS configuration: a total wrap on the OBS API and config | Built (config); Open (API) | `tools/omg_atoms.py`, `STAGES.md`, `CONVENTIONS.md` |
-| R4 | Our own features as OBS plugins | Skeleton (not built) | `plugin/obsmage-core/` |
+| R4 | Our own features as OBS plugins | Skeleton; **compiles and links** against Ubuntu 26.04 libobs-dev on gw33 (2026-11-01); not yet loaded in OBS | `plugin/obsmage-core/` |
 | R5 | A decomposed-tree distribution setup, plus a system-service healer for regular Debian and source builds. Optional pull before build. Follow modes: tagged+signed, tagged, project meta, or main (**main is the default**) | Built | `packaging/healer/omg-heal`, `tests/e2e-healer.sh` |
 | R6 | A physical-space-to-graphical-space map (a local service: ours, or bring your own) | Designed | `docs/AR-CONTROL.md` |
 | R7 | AR desktop control mode. Releases on context menu, Start menu, ESC, Space or any click. Needs 2+ cameras and calibration reachable from the OBS UI with only the core plugin loaded | Designed | `docs/AR-CONTROL.md` |

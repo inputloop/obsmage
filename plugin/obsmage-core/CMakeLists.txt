@@ -1,6 +1,6 @@
 # obsmage-core -- the always-present obsmage plugin: Tools-menu entries for calibration and the
 # screen-map composer. Builds against an installed libobs + obs-frontend-api (upstream OBS or ours).
-# STATUS: skeleton, not yet built in CI. See README.md.
+# STATUS: skeleton; builds against Ubuntu 26.04 libobs-dev (checked on gw33, 2026-11-01).
 cmake_minimum_required(VERSION 3.22)
 project(obsmage-core VERSION 0.0.1 LANGUAGES C)
 
