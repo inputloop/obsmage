@@ -1,0 +1,14 @@
+# /etc/obsmage/heal.conf -- read by omg-heal (KEY=VALUE, no shell expansion)
+SRC=https://example.invalid/obsmage.git
+WORK=/var/lib/obsmage-heal
+# FOLLOW: main (default) | meta | tagged | tagged+signed
+#FOLLOW=main
+#PULL=yes
+#BRANCH=
+#KEYRING=/etc/obsmage/release-keys    # a GNUPGHOME directory, for tagged+signed
+BUILD=deb
+#PATCHES=/usr/share/obsmage/patches
+#DEBIAN=/usr/share/obsmage/debian
+
+# Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later
+# Mentat (for Corwin; claude-sonnet via subagent)

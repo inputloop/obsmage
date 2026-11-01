@@ -1,0 +1,683 @@
+#!/bin/sh
+# omg-heal -- build-and-heal service for obsmage (a downstream OBS Studio distribution)
+#
+# Sets up and tends regular builds of Debian packages and source tarballs from a git source.
+# POSIX sh (tested with dash). Nothing here installs software or signs anything.
+#
+# USAGE
+#   omg-heal [--conf FILE] [--dry-run] plan|build|heal|status
+#   omg-heal selftest            built-in self-checks (need no config)
+#   omg-heal --prove-red         run the self-checks with planted faults; they must go RED
+#
+# SUBCOMMANDS
+#   plan    say in plain words which ref would be built and why. No side effects.
+#   build   fetch (if PULL=yes), resolve the ref, check out a clean tree under WORK/build-<sha8>,
+#           apply our patch series for the detected upstream version, report what was skipped,
+#           then package (BUILD=deb|source|both). Writes WORK/state/last-build.
+#   heal    like build, but only when needed: no earlier build, last build failed, the followed
+#           ref moved, or BUILD changed. Always appends a line to WORK/state/heal.tsv.
+#   status  show the last build record and the recent heal log in words.
+#
+# OPTIONS
+#   --conf FILE   config file (default /etc/obsmage/heal.conf)
+#   --dry-run     print the commands that would change anything instead of running them; no
+#                 state is written. Read-only git queries still run.
+#
+# CONFIG (KEY=VALUE per line; # comments; optional "double" or 'single' quotes; never eval'd)
+#   SRC      git directory or URL to build from                          (required)
+#   WORK     absolute directory for mirror, build trees, outputs, state  (required)
+#   FOLLOW   main | meta | tagged | tagged+signed                        (default main)
+#   PULL     yes | no                                                    (default yes)
+#   BRANCH   branch for main and meta                (default: the remote's default branch)
+#   KEYRING  GNUPGHOME directory holding trusted keys, used by tagged+signed
+#   BUILD    deb | source | both                                         (default deb)
+#   PATCHES  patch tree, patches/<upstream-version>/series               (default <repo>/patches)
+#   DEBIAN   debian/ overlay used when the upstream tree has none  (default packaging/debian)
+#   NAME     package/tarball base name                                   (default obsmage)
+#
+# FOLLOW MODES
+#   main           tip of BRANCH (the default branch unless BRANCH is set). THE DEFAULT.
+#   meta           the version declared in the tree (VERSION file, else CMake project(... VERSION
+#                  x.y.z)) at the tip of BRANCH; builds the tag vX.Y.Z or X.Y.Z for it. No such
+#                  tag: says so and does not build.
+#   tagged         newest release-looking tag (v1.2.3 or 1.2.3) by version order.
+#   tagged+signed  as tagged, but the newest tag must pass `git verify-tag` against KEYRING;
+#                  an unsigned or badly signed tag is REFUSED (no fallback to an older tag).
+#
+# PATCHES: series is quilt style (one patch per line, optional -pN, # comments). A patch that
+# already reverse-applies is reported as already upstream and skipped (upstream behaviour wins).
+# A listed file that is missing is skipped and reported. A patch that fits neither way stops the
+# build (exit 7) rather than silently shipping something unpatched.
+#
+# FILES under WORK: src.git (mirror), build-<sha8>/, <NAME>-<id>.tar.xz, *.deb (dpkg puts them
+# in WORK), state/last-build, state/heal.tsv (when, ref, sha, mode, result; tab separated),
+# state/lock.
+#
+# EXIT CODES
+#   0 ok (or nothing to do)      1 usage or internal error     2 config error
+#   3 a needed tool is missing   4 REFUSED: tag unsigned or bad signature
+#   5 no ref to build (no tags, meta has no tag, branch missing, no local copy yet for plan)
+#   6 build step failed          7 a patch failed to apply     8 fetch/clone failed
+#   9 another run holds the lock
+
+set -u
+set -f
+PROG=omg-heal
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+TAB=$(printf '\t')
+
+say() { printf '%s\n' "$*"; }
+err() { printf '%s: %s\n' "$PROG" "$*" >&2; }
+die() { c=$1; shift; err "$*"; exit "$c"; }
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+run() {
+    if [ "$DRY" = 1 ]; then printf 'DRY-RUN: %s\n' "$*"; return 0; fi
+    "$@"
+}
+
+need_tool() { # hard requirement: tool, debian-package
+    command -v "$1" >/dev/null 2>&1 && return 0
+    err "'$1' is not installed; install the Debian package '$2' (apt install $2)"
+    return 3
+}
+
+want_tool() { # required to build; a note only under --dry-run
+    command -v "$1" >/dev/null 2>&1 && return 0
+    if [ "$DRY" = 1 ]; then
+        say "NOTE (dry-run): '$1' is not installed here; a real run needs the Debian package '$2'"
+        return 0
+    fi
+    err "'$1' is not installed; install the Debian package '$2' (apt install $2)"
+    return 3
+}
+
+# ---------------------------------------------------------------- pure helpers (self-checked)
+
+trim() {
+    s=$1
+    s=${s#"${s%%[![:space:]]*}"}
+    s=${s%"${s##*[![:space:]]}"}
+    printf '%s' "$s"
+}
+
+strip_v() { printf '%s\n' "${1#v}"; }
+
+safe_ver() { # usable as a path component and tarball name
+    case $1 in
+        ''|.*|*[!A-Za-z0-9._+~-]*) return 1 ;;
+    esac
+    return 0
+}
+
+cmake_version() { # stdin: CMakeLists.txt text; prints x.y.z of the first project(... VERSION x.y.z)
+    tr '\n' ' ' | grep -i -o -E '(^|[^A-Za-z_])project[[:space:]]*\([^)]*\)' | head -n 1 |
+        sed -n 's/.*[[:space:]]VERSION[[:space:]]\{1,\}\([0-9][0-9A-Za-z.+~-]*\).*/\1/p'
+}
+
+series_list() { # stdin: quilt series; prints "patch<TAB>strip-level"
+    while IFS= read -r l || [ -n "$l" ]; do
+        l=${l%%#*}
+        set -- $l
+        [ $# -gt 0 ] || continue
+        n=1
+        case ${2:-} in -p[0-9]*) n=${2#-p} ;; esac
+        printf '%s\t%s\n' "$1" "$n"
+    done
+}
+
+set_key() { # config key, value; returns 1 for an unknown key
+    case $1 in
+        SRC) SRC=$2 ;; WORK) WORK=$2 ;; FOLLOW) FOLLOW=$2 ;; PULL) PULL=$2 ;;
+        BRANCH) BRANCH=$2 ;; KEYRING) KEYRING=$2 ;; BUILD) BUILD=$2 ;;
+        PATCHES) PATCHES=$2 ;; DEBIAN) DEBIAN=$2 ;; NAME) NAME=$2 ;;
+        *) return 1 ;;
+    esac
+}
+
+parse_conf() {
+    [ -r "$1" ] || die 2 "cannot read config file $1 (use --conf FILE)"
+    n=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        n=$((n + 1))
+        line=$(trim "$line")
+        case $line in ''|'#'*) continue ;; esac
+        case $line in *=*) ;; *) die 2 "$1 line $n: expected KEY=VALUE" ;; esac
+        k=$(trim "${line%%=*}")
+        v=$(trim "${line#*=}")
+        case $v in
+            \"*\") v=${v#\"}; v=${v%\"} ;;
+            \'*\') v=${v#\'}; v=${v%\'} ;;
+        esac
+        set_key "$k" "$v" || die 2 "$1 line $n: unknown key '$k'"
+    done < "$1"
+}
+
+defaults() {
+    SRC=''; WORK=''; FOLLOW=main; PULL=yes; BRANCH=''; KEYRING=''
+    BUILD=deb; PATCHES=''; DEBIAN=''; NAME=obsmage
+}
+
+finish_conf() {
+    [ -n "$SRC" ] || die 2 "config: SRC is required (a git directory or URL)"
+    [ -n "$WORK" ] || die 2 "config: WORK is required (an absolute directory)"
+    case $WORK in /) die 2 "config: WORK must not be /" ;; /*) ;; *) die 2 "config: WORK must be an absolute path" ;; esac
+    case $FOLLOW in main|meta|tagged|tagged+signed) ;; *) die 2 "config: FOLLOW must be main, meta, tagged or tagged+signed (got '$FOLLOW')" ;; esac
+    case $PULL in yes|no) ;; *) die 2 "config: PULL must be yes or no (got '$PULL')" ;; esac
+    case $BUILD in deb|source|both) ;; *) die 2 "config: BUILD must be deb, source or both (got '$BUILD')" ;; esac
+    safe_ver "$NAME" || die 2 "config: NAME has characters not allowed in a file name"
+    if [ -n "$KEYRING" ] && [ ! -d "$KEYRING" ]; then
+        die 2 "config: KEYRING '$KEYRING' is not a directory (it is used as GNUPGHOME)"
+    fi
+    [ -n "$PATCHES" ] || PATCHES=$SCRIPT_DIR/../../patches
+}
+
+# ---------------------------------------------------------------- git access
+
+repo=''
+is_local_git() { [ -d "$SRC" ] && git -C "$SRC" rev-parse --git-dir >/dev/null 2>&1; }
+
+find_repo() {
+    if [ -d "$WORK/src.git" ]; then repo=$WORK/src.git
+    elif is_local_git; then repo=$SRC
+    else repo=''
+    fi
+}
+
+need_repo() {
+    [ -n "$repo" ] && return 0
+    err "no local copy of $SRC yet, and 'plan' never fetches; run 'build' or 'heal' once to create the mirror"
+    return 5
+}
+
+fetch_src() {
+    if [ -d "$WORK/src.git" ]; then
+        [ "$PULL" = yes ] || return 0
+        say "Pulling: updating the mirror $WORK/src.git from $SRC"
+        run git -C "$WORK/src.git" fetch --prune --quiet origin || { err "fetch from $SRC failed"; return 8; }
+    else
+        if [ "$PULL" = no ] && is_local_git; then return 0; fi
+        say "Cloning: making a mirror of $SRC at $WORK/src.git"
+        run mkdir -p "$WORK" || return 8
+        run git clone --mirror --quiet "$SRC" "$WORK/src.git" || { err "clone of $SRC failed"; return 8; }
+    fi
+    return 0
+}
+
+sha_of() { # full ref name -> commit sha on stdout (empty if absent)
+    if [ -n "$repo" ]; then
+        git -C "$repo" rev-parse -q --verify "$1^{commit}" 2>/dev/null
+    else
+        git ls-remote "$SRC" "$1" 2>/dev/null | awk 'NR==1{print $1}'
+    fi
+}
+
+detect_branch() {
+    if [ -n "$BRANCH" ]; then BR=$BRANCH; BR_WHY="BRANCH=$BRANCH is set in the config"; return 0; fi
+    b=$(git ls-remote --symref "$SRC" HEAD 2>/dev/null | awk '$1=="ref:"{sub("refs/heads/","",$2); print $2; exit}')
+    if [ -n "$b" ]; then BR=$b; BR_WHY="the default branch of $SRC"; return 0; fi
+    if [ -n "$repo" ]; then
+        b=$(git -C "$repo" symbolic-ref -q --short HEAD 2>/dev/null)
+        if [ -n "$b" ]; then BR=$b; BR_WHY="the HEAD branch of the local copy (remote could not be asked)"; return 0; fi
+    fi
+    for b in main master; do
+        if [ -n "$(sha_of "refs/heads/$b")" ]; then BR=$b; BR_WHY="guessed: a branch called $b exists"; return 0; fi
+    done
+    err "cannot tell which branch is the default for $SRC; set BRANCH= in the config"
+    return 5
+}
+
+tree_version() { # sha -> sets TV and TV_FROM
+    TV=''; TV_FROM=''
+    [ -n "$repo" ] || return 1
+    v=$(git -C "$repo" show "$1:VERSION" 2>/dev/null | head -n 1 | tr -d '[:space:]')
+    if [ -n "$v" ]; then TV=$(strip_v "$v"); TV_FROM="the VERSION file"; return 0; fi
+    v=$(git -C "$repo" show "$1:CMakeLists.txt" 2>/dev/null | cmake_version)
+    if [ -n "$v" ]; then TV=$v; TV_FROM="project(... VERSION) in CMakeLists.txt"; return 0; fi
+    return 1
+}
+
+latest_tag() {
+    git -C "$repo" tag -l --sort=-v:refname | grep -E '^v?[0-9]' | head -n 1
+}
+
+check_signed() { # tag -> 0 ok; 3 no gpg; 4 refused
+    need_tool gpg gnupg || return 3
+    kind=$(git -C "$repo" cat-file -t "refs/tags/$1" 2>/dev/null)
+    if [ "$kind" != tag ]; then
+        err "REFUSED: $1 is a lightweight tag, so it carries no signature. FOLLOW=tagged+signed builds only signed tags. Sign it (git tag -s) or use FOLLOW=tagged."
+        return 4
+    fi
+    if ! git -C "$repo" cat-file tag "refs/tags/$1" | grep -q -e 'BEGIN PGP SIGNATURE' -e 'BEGIN SSH SIGNATURE'; then
+        err "REFUSED: tag $1 is not signed. FOLLOW=tagged+signed builds only signed tags. Sign it (git tag -s) or use FOLLOW=tagged."
+        return 4
+    fi
+    if [ -n "$KEYRING" ]; then
+        GNUPGHOME=$KEYRING git -C "$repo" verify-tag "$1" >/dev/null 2>&1; ok=$?
+    else
+        git -C "$repo" verify-tag "$1" >/dev/null 2>&1; ok=$?
+    fi
+    if [ $ok -ne 0 ]; then
+        err "REFUSED: the signature on tag $1 did not verify (bad signature, or the signer's key is not in ${KEYRING:-the default keyring})."
+        return 4
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------- resolving the ref
+
+REF_KIND=''; REF_NAME=''; REF_SHA=''; REF_WHY=''
+
+resolve() {
+    REF_KIND=''; REF_NAME=''; REF_SHA=''; REF_WHY=''
+    case $FOLLOW in
+        main) resolve_main ;;
+        meta) resolve_meta ;;
+        tagged) resolve_tagged 0 ;;
+        tagged+signed) resolve_tagged 1 ;;
+    esac
+}
+
+resolve_main() {
+    detect_branch || return 5
+    s=$(sha_of "refs/heads/$BR")
+    [ -n "$s" ] || { err "branch $BR was not found in $SRC"; return 5; }
+    REF_KIND=branch; REF_NAME=$BR; REF_SHA=$s
+    REF_WHY="FOLLOW=main: the tip of $BR ($BR_WHY). Following the default branch is the default policy."
+}
+
+resolve_tagged() {
+    need_repo || return 5
+    t=$(latest_tag)
+    [ -n "$t" ] || { err "the source has no release-looking tags (v1.2.3 or 1.2.3); nothing to follow with FOLLOW=$FOLLOW"; return 5; }
+    s=$(sha_of "refs/tags/$t")
+    [ -n "$s" ] || { err "tag $t does not point at a commit"; return 5; }
+    REF_KIND=tag; REF_NAME=$t; REF_SHA=$s
+    if [ "$1" = 1 ]; then
+        check_signed "$t"; rc=$?
+        [ $rc -eq 0 ] || return $rc
+        REF_WHY="FOLLOW=tagged+signed: $t is the newest release tag by version order and its signature verified."
+    else
+        REF_WHY="FOLLOW=tagged: $t is the newest release tag by version order (signatures are not checked)."
+    fi
+}
+
+resolve_meta() {
+    need_repo || return 5
+    detect_branch || return 5
+    tip=$(sha_of "refs/heads/$BR")
+    [ -n "$tip" ] || { err "branch $BR was not found in the local copy"; return 5; }
+    if ! tree_version "$tip"; then
+        err "no VERSION file and no CMake project(... VERSION x.y.z) at the tip of $BR; FOLLOW=meta has nothing to read; not building"
+        return 5
+    fi
+    for t in "v$TV" "$TV"; do
+        s=$(sha_of "refs/tags/$t")
+        if [ -n "$s" ]; then
+            REF_KIND=tag; REF_NAME=$t; REF_SHA=$s
+            REF_WHY="FOLLOW=meta: the tree at the tip of $BR declares version $TV (from $TV_FROM) and tag $t is that release."
+            return 0
+        fi
+    done
+    err "the tree at the tip of $BR declares version $TV (from $TV_FROM) but there is no tag v$TV or $TV, so that version is not released yet; not building"
+    return 5
+}
+
+UV=''; UV_FROM=''
+detect_uv() {
+    UV=''; UV_FROM=''
+    if [ "$REF_KIND" = tag ]; then
+        UV=$(strip_v "$REF_NAME"); UV_FROM="the tag name $REF_NAME"
+    elif tree_version "$REF_SHA"; then
+        UV=$TV; UV_FROM=$TV_FROM
+    fi
+    if [ -n "$UV" ] && ! safe_ver "$UV"; then
+        UV=''; UV_FROM="(version string not usable as a directory name; ignored)"
+    fi
+}
+
+series_file() { [ -n "$UV" ] && printf '%s' "$PATCHES/$UV/series"; }
+
+print_plan() {
+    say "Source:           $SRC"
+    say "Follow mode:      $FOLLOW$( [ "$FOLLOW" = main ] && printf ' (the default)' )"
+    if [ "$PULL" = yes ]; then say "Pull:             yes - build and heal fetch first; this plan uses the copy as it stands now"
+    else say "Pull:             no - use what is already here"; fi
+    say "Would build:      $REF_KIND $REF_NAME at $REF_SHA"
+    say "Why:              $REF_WHY"
+    if [ -n "$UV" ]; then say "Upstream version: $UV (from $UV_FROM)"
+    else say "Upstream version: unknown $UV_FROM"; fi
+    sf=$(series_file)
+    if [ -n "$sf" ] && [ -f "$sf" ]; then
+        c=$(series_list < "$sf" | wc -l | tr -d ' ')
+        say "Patches:          $c entries in $sf"
+    else
+        say "Patches:          none for ${UV:-this version} (looked for patches/${UV:-<version>}/series under $PATCHES); upstream is built as it is"
+    fi
+    say "Package:          $BUILD"
+}
+
+# ---------------------------------------------------------------- building
+
+make_worktree() {
+    WT=$WORK/build-$SHORT
+    src_show=${repo:-$WORK/src.git}
+    run mkdir -p "$WORK" || return 6
+    if [ -d "$WT" ]; then run rm -rf "$WT" || return 6; fi
+    run mkdir "$WT" || return 6
+    if [ "$DRY" = 1 ]; then
+        say "DRY-RUN: git -C $src_show archive --format=tar -o $WORK/.tree-$SHORT.tar $REF_SHA && tar -x -f $WORK/.tree-$SHORT.tar -C $WT"
+        return 0
+    fi
+    need_tool tar tar || return 3
+    if git -C "$repo" archive --format=tar -o "$WORK/.tree-$SHORT.tar" "$REF_SHA" &&
+       tar -x -f "$WORK/.tree-$SHORT.tar" -C "$WT"; then
+        rm -f "$WORK/.tree-$SHORT.tar"
+        say "Tree: clean checkout of $REF_SHA at $WT"
+        return 0
+    fi
+    rm -f "$WORK/.tree-$SHORT.tar"
+    err "could not check out $REF_SHA into $WT"
+    return 6
+}
+
+apply_series() {
+    APPLIED=0; SKIPPED=0
+    sf=$(series_file)
+    if [ -z "$sf" ] || [ ! -f "$sf" ]; then
+        say "Patches: none for ${UV:-this version}; building upstream as it is."
+        return 0
+    fi
+    pdir=$PATCHES/$UV
+    tmp=$(mktemp) || return 6
+    series_list < "$sf" > "$tmp"
+    if [ "$DRY" = 1 ]; then
+        while IFS="$TAB" read -r p n; do say "DRY-RUN: would apply $pdir/$p (-p$n) with git apply"; done < "$tmp"
+        rm -f "$tmp"; return 0
+    fi
+    rc=0
+    while IFS="$TAB" read -r p n; do
+        case $p in /*|*..*) err "series entry '$p' leaves the patch directory; refusing"; rc=7; break ;; esac
+        pf=$pdir/$p
+        if [ ! -f "$pf" ]; then
+            say "SKIPPED $p: listed in $sf but the file is missing"; SKIPPED=$((SKIPPED + 1)); continue
+        fi
+        if GIT_CEILING_DIRECTORIES=$WORK git -C "$WT" apply -p"$n" --check "$pf" 2>/dev/null; then
+            if GIT_CEILING_DIRECTORIES=$WORK git -C "$WT" apply -p"$n" "$pf"; then
+                say "APPLIED $p"; APPLIED=$((APPLIED + 1))
+            else err "FAILED $p: git apply stopped half way"; rc=7; break; fi
+        elif GIT_CEILING_DIRECTORIES=$WORK git -C "$WT" apply -p"$n" --check -R "$pf" 2>/dev/null; then
+            say "SKIPPED $p: already in upstream $UV (it reverse-applies cleanly); upstream behaviour preferred"
+            SKIPPED=$((SKIPPED + 1))
+        else
+            err "FAILED $p: does not apply to upstream $UV and is not already there; refresh or retire it"
+            rc=7; break
+        fi
+    done < "$tmp"
+    rm -f "$tmp"
+    say "Patches: $APPLIED applied, $SKIPPED skipped (series $sf)"
+    return $rc
+}
+
+build_source() {
+    want_tool xz xz-utils || return 3
+    if [ "$REF_KIND" = tag ] && [ -n "$UV" ]; then id=$UV
+    elif [ -n "$UV" ]; then id=$UV+git$SHORT
+    else id=git$SHORT; fi
+    base=$WORK/$NAME-$id.tar
+    src_show=${repo:-$WORK/src.git}
+    say "Source tarball: $base.xz (pristine upstream tree; the patch queue travels separately)"
+    if [ "$DRY" = 1 ]; then
+        say "DRY-RUN: git -C $src_show archive --format=tar --prefix=$NAME-$id/ -o $base $REF_SHA"
+        say "DRY-RUN: xz -f -T0 $base"
+        return 0
+    fi
+    git -C "$repo" archive --format=tar --prefix="$NAME-$id/" -o "$base" "$REF_SHA" && xz -f -T0 "$base" ||
+        { err "source tarball step failed"; return 6; }
+    return 0
+}
+
+build_deb() {
+    want_tool dpkg-buildpackage dpkg-dev || return 3
+    if [ ! -d "$WT/debian" ]; then
+        d=${DEBIAN:-$SCRIPT_DIR/../debian}
+        if [ -f "$d/control" ]; then
+            run cp -R "$d" "$WT/debian" || return 6
+        elif [ "$DRY" = 1 ]; then
+            say "NOTE (dry-run): the tree has no debian/ and no overlay with a control file at $d; a real run would stop here"
+        else
+            err "the upstream tree has no debian/ and the overlay $d has no control file; set DEBIAN= to our packaging directory"
+            return 6
+        fi
+    fi
+    if [ "$DRY" = 1 ]; then
+        say "DRY-RUN: (cd $WT && dpkg-buildpackage -us -uc -b)"
+        return 0
+    fi
+    (cd "$WT" && dpkg-buildpackage -us -uc -b) || { err "dpkg-buildpackage failed; see its output above"; return 6; }
+    return 0
+}
+
+run_build() {
+    SHORT=$(printf '%s' "$REF_SHA" | cut -c1-8)
+    say "Building $REF_KIND $REF_NAME ($SHORT) as $BUILD."
+    make_worktree || return $?
+    apply_series || return $?
+    case $BUILD in
+        source) build_source ;;
+        deb) build_deb ;;
+        both) build_source || return $?; build_deb ;;
+    esac
+}
+
+# ---------------------------------------------------------------- state
+
+L_WHEN=''; L_REF=''; L_SHA=''; L_MODE=''; L_RESULT=''
+read_record() {
+    L_WHEN=''; L_REF=''; L_SHA=''; L_MODE=''; L_RESULT=''
+    f=$WORK/state/last-build
+    [ -r "$f" ] || return 1
+    while IFS='=' read -r k v; do
+        case $k in when) L_WHEN=$v ;; ref) L_REF=$v ;; sha) L_SHA=$v ;; mode) L_MODE=$v ;; result) L_RESULT=$v ;; esac
+    done < "$f"
+    return 0
+}
+
+write_record() { # result
+    [ "$DRY" = 1 ] && return 0
+    mkdir -p "$WORK/state" || return 1
+    printf 'when=%s\nref=%s:%s\nsha=%s\nmode=%s\nresult=%s\nfollow=%s\n' \
+        "$(now)" "$REF_KIND" "$REF_NAME" "$REF_SHA" "$BUILD" "$1" "$FOLLOW" > "$WORK/state/last-build.tmp" &&
+        mv "$WORK/state/last-build.tmp" "$WORK/state/last-build"
+}
+
+log_heal() { # ref sha mode result
+    [ "$DRY" = 1 ] && return 0
+    mkdir -p "$WORK/state" || return 1
+    printf '%s\t%s\t%s\t%s\t%s\n' "$(now)" "$1" "$2" "$3" "$4" >> "$WORK/state/heal.tsv"
+}
+
+rc_word() {
+    case $1 in
+        0) printf ok ;; 3) printf missing-tool ;; 4) printf refused ;; 5) printf no-ref ;;
+        6) printf build-failed ;; 7) printf patch-failed ;; 8) printf fetch-failed ;; *) printf failed ;;
+    esac
+}
+
+lock_take() {
+    [ "$DRY" = 1 ] && return 0
+    mkdir -p "$WORK/state" 2>/dev/null || die 2 "cannot create $WORK/state"
+    LK=$WORK/state/lock
+    if ! mkdir "$LK" 2>/dev/null; then
+        p=$(cat "$LK/pid" 2>/dev/null)
+        if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then die 9 "another omg-heal run (pid $p) is in progress"; fi
+        err "removing a stale lock left by pid ${p:-unknown}"
+        rm -rf "$LK"
+        mkdir "$LK" 2>/dev/null || die 9 "cannot take the lock $LK"
+    fi
+    printf '%s\n' "$$" > "$LK/pid"
+    trap 'rm -rf "$LK"' EXIT
+    trap 'exit 130' INT TERM HUP
+}
+
+# ---------------------------------------------------------------- subcommands
+
+prepare() {
+    need_tool git git || return 3
+    fetch_src || return $?
+    find_repo
+    resolve || return $?
+    detect_uv
+    return 0
+}
+
+cmd_plan() {
+    need_tool git git || exit 3
+    find_repo
+    resolve; rc=$?
+    [ $rc -eq 0 ] || exit $rc
+    detect_uv
+    print_plan
+    say "Nothing was changed."
+}
+
+cmd_build() {
+    lock_take
+    prepare || exit $?
+    run_build; rc=$?
+    if [ $rc -eq 0 ]; then write_record ok; say "Build finished: ok."
+    else write_record failed; fi
+    exit $rc
+}
+
+cmd_heal() {
+    lock_take
+    need_tool git git || exit 3
+    fetch_src; rc=$?
+    if [ $rc -ne 0 ]; then log_heal - - "$BUILD" fetch-failed; exit $rc; fi
+    find_repo
+    resolve; rc=$?
+    if [ $rc -ne 0 ]; then log_heal - - "$BUILD" "$(rc_word $rc)"; exit $rc; fi
+    detect_uv
+    label=$REF_KIND:$REF_NAME
+    read_record
+    reason=''
+    if [ -z "$L_SHA" ]; then reason="there is no earlier build record"
+    elif [ "$L_RESULT" != ok ]; then reason="the last build ($L_REF at $L_SHA) did not succeed (result: $L_RESULT)"
+    elif [ "$L_SHA" != "$REF_SHA" ]; then reason="the followed ref moved: last built $L_SHA, now $REF_SHA ($label)"
+    elif [ "$L_MODE" != "$BUILD" ]; then reason="the package mode changed from $L_MODE to $BUILD"
+    fi
+    if [ -z "$reason" ]; then
+        say "Up to date: $label at $REF_SHA was already built ok on $L_WHEN. Nothing to do."
+        log_heal "$label" "$REF_SHA" "$BUILD" uptodate
+        exit 0
+    fi
+    say "Building because $reason."
+    run_build; rc=$?
+    if [ $rc -eq 0 ]; then write_record ok; log_heal "$label" "$REF_SHA" "$BUILD" ok; say "Heal finished: ok."
+    else write_record failed; log_heal "$label" "$REF_SHA" "$BUILD" "$(rc_word $rc)"; fi
+    exit $rc
+}
+
+cmd_status() {
+    if read_record; then
+        say "Last build: $L_REF at $L_SHA, package mode $L_MODE, result $L_RESULT, on $L_WHEN."
+    else
+        say "No build has been recorded under $WORK/state yet."
+    fi
+    if [ -r "$WORK/state/heal.tsv" ]; then
+        say "Recent heal runs (newest last):"
+        tail -n 5 "$WORK/state/heal.tsv" | while IFS="$TAB" read -r w r s m o; do
+            say "  $w: $r ${s:+at $s }($m) -> $o"
+        done
+    else
+        say "The healer has not run yet (no $WORK/state/heal.tsv)."
+    fi
+}
+
+# ---------------------------------------------------------------- self-checks
+
+check() { # name expected actual
+    if [ "$2" = "$3" ]; then say "ok   $1"; else say "FAIL $1: expected '$2' got '$3'"; fi
+}
+
+run_checks() {
+    check "strip_v drops a leading v" "1.2.3" "$(strip_v v1.2.3)"
+    check "strip_v leaves bare version" "1.2.3" "$(strip_v 1.2.3)"
+    cm='cmake_minimum_required(VERSION 3.22)
+project(foo
+  LANGUAGES C CXX
+  VERSION 2.4.1)'
+    check "cmake_version skips cmake_minimum_required" "2.4.1" "$(printf '%s\n' "$cm" | cmake_version)"
+    check "cmake_version none declared" "" "$(printf 'project(foo LANGUAGES C)\n' | cmake_version)"
+    sl=$(printf '# c\n\nA.patch\nB.patch -p0  # why\n' | series_list | tr '\t\n' ' :')
+    check "series_list skips comments, reads -pN" "A.patch 1:B.patch 0:" "$sl"
+    if safe_ver "../x"; then check "safe_ver rejects ../x" reject accept; else check "safe_ver rejects ../x" reject reject; fi
+    if safe_ver "31.0.1"; then check "safe_ver accepts 31.0.1" accept accept; else check "safe_ver accepts 31.0.1" accept reject; fi
+    cf=$(mktemp)
+    printf '# c\nSRC = "/x y"\nFOLLOW=meta\n' > "$cf"
+    got=$( defaults; parse_conf "$cf"; printf '%s|%s|%s' "$SRC" "$FOLLOW" "$PULL" )
+    check "parse_conf reads quotes and defaults" "/x y|meta|yes" "$got"
+    printf 'BOGUS=1\n' > "$cf"
+    ( parse_conf "$cf" ) >/dev/null 2>&1; rcc=$?
+    check "parse_conf rejects unknown key (exit 2)" "2" "$rcc"
+    rm -f "$cf"
+}
+
+cmd_selftest() {
+    out=$(run_checks)
+    printf '%s\n' "$out"
+    f=$(printf '%s\n' "$out" | grep -c '^FAIL')
+    if [ "$f" -gt 0 ]; then say "selftest: $f check(s) FAILED"; return 1; fi
+    say "selftest: all checks passed"
+}
+
+cmd_prove_red() {
+    say "Planting faults in strip_v, cmake_version and series_list; the checks must go RED."
+    out=$(
+        strip_v() { printf '%s\n' "$1"; }
+        cmake_version() { cat >/dev/null; printf '3.22\n'; }
+        series_list() { while IFS= read -r l; do printf '%s\t1\n' "$l"; done; }
+        run_checks
+    )
+    printf '%s\n' "$out"
+    f=$(printf '%s\n' "$out" | grep -c '^FAIL')
+    if [ "$f" -gt 0 ]; then say "PROVE-RED: ok - $f check(s) went red with the planted faults"; return 0; fi
+    say "PROVE-RED: FAILED - the checks stayed green with faults planted; they cannot be trusted"
+    return 1
+}
+
+usage() {
+    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//' | sed -n '1,22p'
+}
+
+main() {
+    CONF=/etc/obsmage/heal.conf; DRY=0; CMD=''; PR=0
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --conf) [ $# -ge 2 ] || { err "--conf needs a file"; exit 1; }; CONF=$2; shift 2 ;;
+            --conf=*) CONF=${1#--conf=}; shift ;;
+            --dry-run) DRY=1; shift ;;
+            --prove-red) PR=1; shift ;;
+            -h|--help) usage; exit 0 ;;
+            plan|build|heal|status|selftest) CMD=$1; shift ;;
+            *) err "unknown argument '$1' (try --help)"; exit 1 ;;
+        esac
+    done
+    if [ $PR = 1 ]; then cmd_prove_red; exit $?; fi
+    [ -n "$CMD" ] || { err "no subcommand; use plan, build, heal, status or selftest (try --help)"; exit 1; }
+    if [ "$CMD" = selftest ]; then cmd_selftest; exit $?; fi
+    defaults
+    parse_conf "$CONF"
+    finish_conf
+    case $CMD in
+        plan) cmd_plan ;; build) cmd_build ;; heal) cmd_heal ;; status) cmd_status ;;
+    esac
+}
+
+# FAULT-POINT
+main "$@"
+exit $?
+
+# Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later
+# Mentat (for Corwin; claude-sonnet via subagent)

@@ -1,0 +1,16 @@
+{"bom": true, "crlf": true, "trailing": true}
+S General
+K Name
+R 
+S Video
+K BaseCX
+K BaseCY
+R 
+S Twitch
+K Name
+K Token
+K RefreshToken
+R 
+S WebsocketAPI
+K ServerPort
+K AuthSecret

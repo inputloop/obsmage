@@ -1,0 +1,16 @@
+{
+    "current_scene": "Main",
+    "name": "Demo",
+    "scene_order": [{"name": "Main"}],
+    "sources": [
+        {"id": "monitor_capture", "name": "Left", "settings": {"monitor": 1, "capture_cursor": true}, "filters": []},
+        {"id": "monitor_capture", "name": "Right", "settings": {"monitor_id": "\\\\?\\DISPLAY#EXA0001#1&0&UID1#{guid}"}},
+        {"id": "text_gdiplus", "name": "Lower third", "settings": {"text": "line one\nline = two: three", "font": {"face": "Arial", "size": 48}}},
+        {"id": "scene", "name": "Main", "settings": {"items": [
+            {"name": "Left", "id": 1, "pos": {"x": 0.0, "y": 0.0}, "scale": {"x": 0.5, "y": 0.5}, "visible": true},
+            {"name": "Right", "id": 2, "pos": {"x": 960.0, "y": 0.0}, "scale": {"x": 0.5, "y": 0.5}, "visible": false}
+        ], "custom_size": false}}
+    ],
+    "groups": [],
+    "transitions": []
+}

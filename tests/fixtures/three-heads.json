@@ -1,0 +1,271 @@
+{
+    "current_scene": "Screenmap",
+    "current_program_scene": "Screenmap",
+    "scene_order": [
+        {
+            "name": "Screenmap"
+        }
+    ],
+    "name": "three-heads",
+    "sources": [
+        {
+            "prev_ver": 536870914,
+            "name": "Left Head",
+            "uuid": "11111111-1111-4111-8111-111111111111",
+            "id": "monitor_capture",
+            "versioned_id": "monitor_capture",
+            "settings": {
+                "monitor": 0
+            },
+            "mixers": 0,
+            "sync": 0,
+            "flags": 0,
+            "volume": 1.0,
+            "balance": 0.5,
+            "enabled": true,
+            "muted": false,
+            "hotkeys": {},
+            "private_settings": {}
+        },
+        {
+            "prev_ver": 536870914,
+            "name": "Center Head",
+            "uuid": "22222222-2222-4222-8222-222222222222",
+            "id": "monitor_capture",
+            "versioned_id": "monitor_capture",
+            "settings": {
+                "monitor": 1
+            },
+            "mixers": 0,
+            "sync": 0,
+            "flags": 0,
+            "volume": 1.0,
+            "balance": 0.5,
+            "enabled": true,
+            "muted": false,
+            "hotkeys": {},
+            "private_settings": {}
+        },
+        {
+            "prev_ver": 536870914,
+            "name": "Right Head",
+            "uuid": "33333333-3333-4333-8333-333333333333",
+            "id": "monitor_capture",
+            "versioned_id": "monitor_capture",
+            "settings": {
+                "monitor_id": "\\\\?\\DISPLAY#GEN102#5&1&0&UID102#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}",
+                "monitor": 2
+            },
+            "mixers": 0,
+            "sync": 0,
+            "flags": 0,
+            "volume": 1.0,
+            "balance": 0.5,
+            "enabled": true,
+            "muted": false,
+            "hotkeys": {},
+            "private_settings": {}
+        },
+        {
+            "prev_ver": 536870914,
+            "name": "Screenmap",
+            "uuid": "44444444-4444-4444-8444-444444444444",
+            "id": "scene",
+            "versioned_id": "scene",
+            "settings": {
+                "custom_size": false,
+                "id_counter": 3,
+                "items": [
+                    {
+                        "name": "Left Head",
+                        "source_uuid": "11111111-1111-4111-8111-111111111111",
+                        "visible": true,
+                        "locked": false,
+                        "rot": 0.0,
+                        "scale_ref": {
+                            "x": 1920.0,
+                            "y": 1080.0
+                        },
+                        "align": 5,
+                        "bounds_type": 0,
+                        "bounds_align": 0,
+                        "bounds_crop": false,
+                        "crop_left": 0,
+                        "crop_top": 0,
+                        "crop_right": 0,
+                        "crop_bottom": 0,
+                        "id": 1,
+                        "group_item_backup": false,
+                        "pos": {
+                            "x": 100,
+                            "y": 300
+                        },
+                        "pos_rel": {
+                            "x": -1.5925925925925926,
+                            "y": -0.4444444444444444
+                        },
+                        "scale": {
+                            "x": 0.2,
+                            "y": 0.2
+                        },
+                        "scale_rel": {
+                            "x": 0.2,
+                            "y": 0.2
+                        },
+                        "bounds": {
+                            "x": 0.0,
+                            "y": 0.0
+                        },
+                        "bounds_rel": {
+                            "x": 0.0,
+                            "y": 0.0
+                        },
+                        "scale_filter": "disable",
+                        "blend_method": "default",
+                        "blend_type": "normal",
+                        "show_transition": {
+                            "duration": 0
+                        },
+                        "hide_transition": {
+                            "duration": 0
+                        },
+                        "private_settings": {}
+                    },
+                    {
+                        "name": "Center Head",
+                        "source_uuid": "22222222-2222-4222-8222-222222222222",
+                        "visible": true,
+                        "locked": false,
+                        "rot": 0.0,
+                        "scale_ref": {
+                            "x": 1920.0,
+                            "y": 1080.0
+                        },
+                        "align": 5,
+                        "bounds_type": 0,
+                        "bounds_align": 0,
+                        "bounds_crop": false,
+                        "crop_left": 0,
+                        "crop_top": 0,
+                        "crop_right": 0,
+                        "crop_bottom": 0,
+                        "id": 2,
+                        "group_item_backup": false,
+                        "pos": {
+                            "x": 500,
+                            "y": 300
+                        },
+                        "pos_rel": {
+                            "x": -0.8518518518518519,
+                            "y": -0.4444444444444444
+                        },
+                        "scale": {
+                            "x": 0.2,
+                            "y": 0.2
+                        },
+                        "scale_rel": {
+                            "x": 0.2,
+                            "y": 0.2
+                        },
+                        "bounds": {
+                            "x": 0.0,
+                            "y": 0.0
+                        },
+                        "bounds_rel": {
+                            "x": 0.0,
+                            "y": 0.0
+                        },
+                        "scale_filter": "disable",
+                        "blend_method": "default",
+                        "blend_type": "normal",
+                        "show_transition": {
+                            "duration": 0
+                        },
+                        "hide_transition": {
+                            "duration": 0
+                        },
+                        "private_settings": {}
+                    },
+                    {
+                        "name": "Right Head",
+                        "source_uuid": "33333333-3333-4333-8333-333333333333",
+                        "visible": true,
+                        "locked": false,
+                        "rot": 0.0,
+                        "scale_ref": {
+                            "x": 1920.0,
+                            "y": 1080.0
+                        },
+                        "align": 5,
+                        "bounds_type": 0,
+                        "bounds_align": 0,
+                        "bounds_crop": false,
+                        "crop_left": 0,
+                        "crop_top": 0,
+                        "crop_right": 0,
+                        "crop_bottom": 0,
+                        "id": 3,
+                        "group_item_backup": false,
+                        "pos": {
+                            "x": 900,
+                            "y": 300
+                        },
+                        "pos_rel": {
+                            "x": -0.1111111111111111,
+                            "y": -0.4444444444444444
+                        },
+                        "scale": {
+                            "x": 0.2,
+                            "y": 0.2
+                        },
+                        "scale_rel": {
+                            "x": 0.2,
+                            "y": 0.2
+                        },
+                        "bounds": {
+                            "x": 0.0,
+                            "y": 0.0
+                        },
+                        "bounds_rel": {
+                            "x": 0.0,
+                            "y": 0.0
+                        },
+                        "scale_filter": "disable",
+                        "blend_method": "default",
+                        "blend_type": "normal",
+                        "show_transition": {
+                            "duration": 0
+                        },
+                        "hide_transition": {
+                            "duration": 0
+                        },
+                        "private_settings": {}
+                    }
+                ]
+            },
+            "mixers": 0,
+            "sync": 0,
+            "flags": 0,
+            "volume": 1.0,
+            "balance": 0.5,
+            "enabled": true,
+            "muted": false,
+            "hotkeys": {
+                "OBSBasic.SelectScene": [],
+                "libobs.show_scene_item.1": [],
+                "libobs.hide_scene_item.1": [],
+                "libobs.show_scene_item.2": [],
+                "libobs.hide_scene_item.2": [],
+                "libobs.show_scene_item.3": [],
+                "libobs.hide_scene_item.3": []
+            },
+            "private_settings": {}
+        }
+    ],
+    "groups": [],
+    "resolution": {
+        "x": 1920,
+        "y": 1080
+    },
+    "version": 2
+}

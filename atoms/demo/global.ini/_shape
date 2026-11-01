@@ -1,0 +1,8 @@
+{"bom": false, "crlf": false, "trailing": true}
+S General
+K FirstRun
+R ; a comment line
+R 
+S Basic
+K Profile
+K SceneCollection

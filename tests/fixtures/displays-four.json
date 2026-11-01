@@ -1,0 +1,42 @@
+[
+  {
+    "id": "\\\\?\\DISPLAY#GEN100#5&1&0&UID100#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}",
+    "index": 0,
+    "name": "Left",
+    "x": 0,
+    "y": 0,
+    "w": 1920,
+    "h": 1080,
+    "primary": false
+  },
+  {
+    "id": "\\\\?\\DISPLAY#GEN101#5&1&0&UID101#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}",
+    "index": 1,
+    "name": "Center",
+    "x": 1920,
+    "y": 0,
+    "w": 1920,
+    "h": 1080,
+    "primary": true
+  },
+  {
+    "id": "\\\\?\\DISPLAY#GEN102#5&1&0&UID102#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}",
+    "index": 2,
+    "name": "Right",
+    "x": 3840,
+    "y": 0,
+    "w": 1920,
+    "h": 1080,
+    "primary": false
+  },
+  {
+    "id": "\\\\?\\DISPLAY#GEN103#5&1&0&UID103#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}",
+    "index": 3,
+    "name": "New",
+    "x": 5760,
+    "y": 0,
+    "w": 1920,
+    "h": 1080,
+    "primary": false
+  }
+]
