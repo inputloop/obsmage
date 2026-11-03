@@ -1,5 +1,7 @@
 # To any agent working in this repository
 
+This repository is **public** (since 2026-11-02): every byte and every commit message is published.
+
 ## Who commits, and how the agent's part is said
 
 As in every inputloop repository (the full rule: ils4's AGENTS.md, section 1): commits are authored by
@@ -7,6 +9,11 @@ the person the work is for, `Corwin Brust <corwin@bru.st>`, unsigned (signing is
 The agent's part is a byline, the last line of the message: `Mentat (for Corwin, <model>)`, with the
 serving model as the session reports it. **No vendor trailers, no session links.**
 
+
+## Where work lands
+
+Work lands on `main` once the checks are green, and the agent pushes it (the pre-push hook runs the
+checks again). Nothing here makes anything more public.
 
 ## Before every push
 
