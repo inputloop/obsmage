@@ -87,9 +87,39 @@ only for an upstream tree that has none). Tests run inside the build.
 `packaging/healer/user/` holds the same service and timer for one user without root
 (`systemctl --user`); `NOTES.md` has the install lines and the undo. It is what runs on gw33.
 
+## The test instance (2026-11-02)
+
+`packaging/healer/omg-load-check` keeps requirement R4 ("loads") checked, not remembered. The user
+heal service starts `obsmage-loadcheck.service` after every good run (`OnSuccess=`): the newest
+`obsmage_*.deb` in `WORK` is unpacked (never installed), its `obsmage-core.so` copied into a throwaway
+HOME as a user plugin, OBS Studio started under `xvfb-run` in its own process group, and the log read
+until the plugin's "loaded" line (at most `LOAD_SECS`, 60). Then the whole group is stopped and the
+HOME removed. `WORK/state/load-check` holds the last result, `load.tsv` every one. Exit 0 loaded, 1
+not, 3 a tool is missing. `tests/e2e-loadcheck.sh` checks it against a fake OBS that leaves a child
+behind.
+
+## The distribution pipeline (2026-11-02)
+
+`packaging/dist/omg-dist` builds, from one commit (default: `main` of the healer's mirror), a source
+tarball `obsmage-<version>-<stamp>-<rev12>.tar.gz` (`git archive` through `gzip -n`: the same commit
+gives the same bytes; the stamp is the commit's time) and, when `dpkg-buildpackage` and the build
+dependencies are present, the Debian package `obsmage_<version>+git<stamp>.<rev7>_<arch>.deb` (a
+snapshot changelog entry made from the commit, built with `SOURCE_DATE_EPOCH` set to the commit time).
+Every bundle passes `packaging/dist/secret-scan.py` first: a credential in an atom store must read
+`@secret(len=N)`, and nothing shaped like a live key may appear (lines saying FAKE excepted, as this
+tree marks its test credentials). Then it stages, into `DIST_OUT/public/`, the bundles, one record per
+release, `SHA256SUMS`, and last the channel feed `channel.json` (channel/1, the line form of c4's
+`d/channels/SPEC.md` and about-corwin's feed, with obsmage's `deb`, `deb_sha256` and `deb_size`),
+checked by `packaging/dist/chan_check.py` before it replaces the old one. It keeps 20 releases (never
+fewer than 3) and does nothing when the commit has not moved. On gw33 it runs as a user timer
+(`packaging/dist/user/`, daily after the healer), staging into `/var/lib/obsmage-dist/`; nginx serves
+`public/` at https://obsmage.com/dist/ while `site/site.conf` says `releases: open`.
+Checked by `tests/e2e-dist.sh` (sh) and `tests/test_dist.py` (Python); `--prove-red` plants nine faults.
+
 ## Limits
 
-The healer packages but does not install build dependencies, sign packages, or publish them.
+The healer packages but does not install build dependencies, sign packages, or publish them; omg-dist
+stages them for nginx and does not sign them either (a signature slot is in the feed's spec).
 Submodules are not checked out. `--dry-run` still runs read-only git queries. The `meta` mode
 reads the first `project(...)` call in `CMakeLists.txt`; a version given by a variable is not
 resolved.

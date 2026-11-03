@@ -1,0 +1,19 @@
+[Unit]
+Description=obsmage test instance: does the newest package's plugin load in this host's OBS Studio?
+Documentation=file://%h/.local/share/doc/obsmage/PACKAGING.md
+ConditionPathExists=%h/.config/obsmage/heal.conf
+
+[Service]
+Type=oneshot
+# Started by obsmage-heal.service (OnSuccess=) after every good heal; also by hand:
+#   systemctl --user start obsmage-loadcheck.service
+ExecStart=%h/.local/lib/obsmage/omg-load-check --conf %h/.config/obsmage/heal.conf
+Nice=10
+TimeoutStartSec=10min
+NoNewPrivileges=yes
+# OBS and the virtual display run in their own process group, which the check stops itself;
+# KillMode=control-group makes sure nothing outlives the unit even if the check is killed.
+KillMode=control-group
+
+# Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later
+# Mentat (for Corwin, claude-opus-5-5)

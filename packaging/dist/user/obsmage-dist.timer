@@ -1,0 +1,15 @@
+[Unit]
+Description=Run the obsmage distribution pipeline daily, after the healer's usual hour
+
+[Timer]
+OnBootSec=40min
+OnCalendar=*-*-* 01:17:00
+RandomizedDelaySec=20min
+Persistent=true
+Unit=obsmage-dist.service
+
+[Install]
+WantedBy=timers.target
+
+# Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later
+# Mentat (for Corwin, claude-opus-5-5)

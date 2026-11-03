@@ -16,6 +16,8 @@ AT8  suggest never changes the atom store.
 AT9  `find` exits 0 and prints FOUND or absent for each usual location.
 AT10 rollup and unroll accept a bare file name (no directory part) for STAGES.md.
      (Found 2026-11-01 when a rollup to `STAGES.md` in the current directory crashed.)
+AT11 obs-websocket's password (`ServerPassword` in [OBSWebSocket]) is a secret: withheld as
+     @secret(len=N), never published. (Found 2026-11-02: the rule knew only `server_password`.)
 
 Copyright 2026 INPUTLOOP; CC-BY-SA-4.0.
 Mentat (for Corwin; claude-opus-5-5)

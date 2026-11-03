@@ -7,12 +7,16 @@ override_dh_auto_test:
 	python3 -W ignore -m unittest discover -s tests
 	sh tests/e2e.sh
 	sh tests/e2e-healer.sh
+	sh tests/e2e-loadcheck.sh
 
 override_dh_auto_install:
 	dh_auto_install
 	install -d debian/obsmage/usr/share/obsmage/tools debian/obsmage/usr/share/obsmage/healer debian/obsmage/usr/bin
 	install -m 0644 tools/omg_atoms.py tools/omg_compose.py debian/obsmage/usr/share/obsmage/tools/
 	install -m 0755 packaging/healer/omg-heal debian/obsmage/usr/share/obsmage/healer/omg-heal
+	install -m 0755 packaging/healer/omg-load-check debian/obsmage/usr/share/obsmage/healer/omg-load-check
+	install -m 0644 packaging/healer/user/obsmage-heal.service packaging/healer/user/obsmage-heal.timer \
+		packaging/healer/user/obsmage-loadcheck.service debian/obsmage/usr/share/obsmage/healer/
 	install -m 0644 packaging/healer/heal.conf.example packaging/healer/obsmage-heal.service \
 		packaging/healer/obsmage-heal.timer packaging/healer/NOTES.md debian/obsmage/usr/share/obsmage/healer/
 	printf '#!/bin/sh\nexec python3 /usr/share/obsmage/tools/omg_atoms.py "$$@"\n' > debian/obsmage/usr/bin/omg-atoms

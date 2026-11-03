@@ -1,0 +1,66 @@
+#!/bin/sh
+# omg-load-check -- the test instance: does the newest obsmage package's plugin load in the OBS
+# Studio installed on this host? (Requirement R4, "loads".) The package is unpacked, never
+# installed; OBS runs under a virtual display, in a throwaway HOME with only obsmage-core added
+# as a user plugin; its log is read; then OBS and everything it started is stopped, as a process
+# group, and the throwaway HOME removed. The healer's user unit runs this after every good heal.
+#
+#   omg-load-check [--conf FILE] [--deb FILE]      exit 0 loaded; 1 not loaded; 3 a tool is missing
+# --conf reads WORK from heal.conf (the newest obsmage_*.deb there is checked); --deb names one.
+# Writes WORK/state/load-check (key=value, the last run) and appends to WORK/state/load.tsv
+# (when, deb, result, OBS version, seconds). Prints the plugin's own log lines.
+# Settings: LOAD_SECS (60) longest wait for the plugin's "loaded" line; KEEP_TMP=1 keeps the HOME.
+# Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later.
+set -u
+CONF=$HOME/.config/obsmage/heal.conf; DEB=
+while [ $# -gt 0 ]; do
+  case $1 in --conf) CONF=$2; shift 2 ;; --deb) DEB=$2; shift 2 ;; *) echo "usage: omg-load-check [--conf FILE] [--deb FILE]" >&2; exit 64 ;; esac
+done
+WORK=$(sed -n 's/^WORK=//p' "$CONF" 2>/dev/null | tail -n 1)
+[ -n "$WORK" ] || WORK=$HOME/obsmage-heal
+SECS=${LOAD_SECS:-60}
+if [ -z "$DEB" ]; then DEB=$(ls -1t "$WORK"/obsmage_*.deb 2>/dev/null | head -n 1); fi
+[ -n "$DEB" ] && [ -s "$DEB" ] || { echo "omg-load-check: no obsmage package in $WORK (has the healer built one?)" >&2; exit 1; }
+for t in obs xvfb-run dpkg-deb setsid; do
+  command -v $t >/dev/null 2>&1 || { echo "omg-load-check: $t is not installed; nothing checked" >&2; exit 3; }
+done
+mkdir -p "$WORK/state"
+T=$(mktemp -d "${TMPDIR:-/tmp}/omg-load.XXXXXX")
+pg=
+cleanup() {
+  if [ -n "$pg" ]; then kill -TERM "-$pg" 2>/dev/null; sleep 2; kill -KILL "-$pg" 2>/dev/null; fi
+  [ "${KEEP_TMP:-}" = 1 ] || rm -rf "$T"
+}
+trap cleanup EXIT INT TERM
+
+dpkg-deb -x "$DEB" "$T/x" || { echo "omg-load-check: $DEB does not unpack" >&2; exit 1; }
+so=$(find "$T/x" -name 'obsmage-core.so' | head -n 1)
+[ -n "$so" ] || { echo "omg-load-check: no obsmage-core.so in $DEB" >&2; exit 1; }
+P=$T/home/.config/obs-studio/plugins/obsmage-core
+mkdir -p "$P/bin/64bit" "$P/data"
+cp "$so" "$P/bin/64bit/"
+d=$(find "$T/x" -type d -path '*obs-plugins/obsmage-core' -not -path '*/lib/*' | head -n 1)
+[ -n "$d" ] && cp -R "$d/." "$P/data/"
+ver=$(obs --version 2>/dev/null | head -n 1)
+
+# OBS in its own process group (setsid), so it and every child can be stopped together
+start=$(date +%s)
+( cd "$T/home" && HOME=$T/home XDG_CONFIG_HOME=$T/home/.config LIBGL_ALWAYS_SOFTWARE=1 \
+  exec setsid sh -c 'echo $$ > "$1/pg"; exec xvfb-run -a -s "-screen 0 1280x800x24" obs --multi --disable-updater --disable-shutdown-check --verbose' sh "$T" \
+  > "$T/obs-stdout.txt" 2>&1 ) &
+i=0; while [ ! -s "$T/pg" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+pg=$(cat "$T/pg" 2>/dev/null)
+result=not-loaded; n=0
+while [ $n -lt "$SECS" ]; do
+  if grep -qs '\[obsmage-core\] loaded' "$T/home/.config/obs-studio/logs/"*.txt "$T/obs-stdout.txt"; then result=loaded; break; fi
+  [ -n "$pg" ] && kill -0 "-$pg" 2>/dev/null || break    # OBS gave up before the plugin said anything
+  sleep 1; n=$((n + 1))
+done
+secs=$(( $(date +%s) - start ))
+grep -hs -E '\[obsmage-core\]|obsmage-core\.so|Failed to load|failed to load' "$T/home/.config/obs-studio/logs/"*.txt | head -n 20
+if [ $result = loaded ] && ! grep -qs 'obsmage-core\.so' "$T/home/.config/obs-studio/logs/"*.txt "$T/obs-stdout.txt"; then result=not-loaded; fi
+when=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf 'when=%s\ndeb=%s\nresult=%s\nobs=%s\nseconds=%s\n' "$when" "$(basename "$DEB")" "$result" "$ver" "$secs" > "$WORK/state/load-check"
+printf '%s\t%s\t%s\t%s\t%s\n' "$when" "$(basename "$DEB")" "$result" "$ver" "$secs" >> "$WORK/state/load.tsv"
+echo "omg-load-check: $(basename "$DEB") $result in $ver after ${secs}s"
+[ $result = loaded ]

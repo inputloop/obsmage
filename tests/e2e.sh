@@ -74,6 +74,13 @@ out=$($omg find); rc=$?
 ( cd "$t" && $omg rollup atoms STAGES-bare.md >/dev/null ) && [ -s "$t/STAGES-bare.md" ] \
   && ok "AT10 rollup to a bare file name" || red "AT10 rollup to a bare file name"
 
+# AT11 (found 2026-11-02: obs-websocket's ServerPassword was published as plain)
+mkdir -p "$t/ws"; printf '[OBSWebSocket]\nServerEnabled=true\nServerPassword=FAKEwsPassword42\n' > "$t/ws/global.ini"
+[ "${1:-}" = --prove-red ] && printf '[X]\nleak=FAKEwsPassword42\n' >> "$t/ws/global.ini"
+$omg split "$t/ws" "$t/ws-atoms" --vault "$t/ws-vault.kv" >/dev/null
+! grep -rqF FAKEwsPassword42 "$t/ws-atoms" && grep -q '^ServerPassword=@secret(len=16)$' "$t/ws-atoms/global.ini/set-OBSWebSocket.kv" \
+  && ok "AT11 websocket password withheld" || red "AT11 websocket password withheld"
+
 echo "e2e: $pass ok, $fail RED"
 [ $fail = 0 ]
 

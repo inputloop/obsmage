@@ -11,6 +11,7 @@ if [ "${1:-}" = --prove-red ]; then
   echo 'User=obsmage-heal' >> "$t/user/obsmage-heal.service"
   rm "$t/debian/source/format"
   sed -i 's/^Package: obsmage/Package: other/' "$t/debian/control"
+  sed -i '/^OnSuccess=/d' "$t/user/obsmage-heal.service"
 fi
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); echo "ok    $1"; }
@@ -23,6 +24,9 @@ chk "user service runs omg-heal heal" grep -q '^ExecStart=.*omg-heal .*heal$' "$
 chk "user service has no User=" no grep -q '^User=' "$S"
 chk "user service has no StateDirectory=" no grep -q '^StateDirectory=' "$S"
 chk "user timer is daily and installs into timers.target" sh -c "grep -q '^OnCalendar=daily' '$T' && grep -q '^WantedBy=timers.target' '$T'"
+L="$t/user/obsmage-loadcheck.service"
+chk "user service starts the load check after a good run" grep -q '^OnSuccess=obsmage-loadcheck.service$' "$S"
+chk "the load-check unit runs omg-load-check and stops its whole group" sh -c "grep -q '^ExecStart=.*omg-load-check ' '$L' && grep -q '^KillMode=control-group' '$L'"
 chk "debian/control names the package" grep -q '^Package: obsmage$' "$t/debian/control"
 chk "debian/control builds against libobs-dev" grep -q 'Build-Depends:.*libobs-dev' "$t/debian/control"
 chk "debian/source/format is native" grep -q 'native' "$t/debian/source/format"

@@ -1,0 +1,153 @@
+#!/bin/sh
+# omg-dist -- obsmage's distribution pipeline: from one commit, a reproducible source tarball and
+# (when the build tools are there) a Debian package, each with its sha256, named in one channel
+# feed (channel/1, the shape of about-corwin's; c4 d/channels/SPEC.md), staged in a folder.
+# It stages; it does not publish. Whether nginx serves the folder is site/site.conf's one line.
+#
+#   omg-dist [-v] [-n] [-f]        -v say what happens   -n only say what would be built   -f build even if nothing moved
+# Settings (environment, all optional):
+#   DIST_SRC       git repository or URL to build from    (the healer's mirror, else https://github.com/inputloop/obsmage.git)
+#   DIST_REF       branch, tag or commit                   (main)
+#   DIST_OUT       staging folder                          (/var/lib/obsmage-dist)
+#                  $DIST_OUT/public/   what may be served: bundles, per-release .json, SHA256SUMS, channel.json
+#                  $DIST_OUT/work/     private: the clone, build trees, logs
+#   DIST_BASE_URL  where public/ is served, for the feed's artifact address; empty = bare names (next to the feed)
+#   DIST_DEB       auto | yes | no                         (auto: build the .deb when dpkg-buildpackage and the build dependencies are there)
+#   DIST_KEEP      releases to keep, never fewer than 3    (20)
+#   PYTHON         python3
+# Every bundle passes secret-scan.py (credentials in atoms must be withheld; nothing shaped like a
+# live key) before it is staged; a finding stops the run and nothing is staged.
+# Reproducible: the tarball is `git archive` of the commit (file times are the commit's) through
+# `gzip -n`; the release's name and stamp come from the commit, not the clock; the .deb is built with
+# SOURCE_DATE_EPOCH set to the commit time and a snapshot version made from the commit.
+# Exit: 0 staged or nothing new; 1 failed (nothing staged; one line in work/dist.log); 64 usage.
+# Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later.
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+CHANNEL=obsmage
+OUT=${DIST_OUT:-/var/lib/obsmage-dist}
+REF=${DIST_REF:-main}
+BASE=${DIST_BASE_URL:-}
+DEB=${DIST_DEB:-auto}
+KEEP=${DIST_KEEP:-20}
+PY=${PYTHON:-python3}
+if [ -n "${DIST_SRC:-}" ]; then SRC=$DIST_SRC
+elif [ -d "$HOME/obsmage-heal/src.git" ]; then SRC=$HOME/obsmage-heal/src.git
+else SRC=https://github.com/inputloop/obsmage.git; fi
+V=0; DRY=0; FORCE=0
+for a in "$@"; do case $a in -v) V=1 ;; -n) DRY=1 ;; -f) FORCE=1 ;; *) echo "usage: omg-dist [-v] [-n] [-f]" >&2; exit 64 ;; esac; done
+case $KEEP in ''|*[!0-9]*) KEEP=20 ;; esac
+[ "$KEEP" -ge 3 ] || KEEP=3
+case $DEB in auto|yes|no) ;; *) echo "omg-dist: DIST_DEB is auto, yes or no" >&2; exit 64 ;; esac
+
+PUB=$OUT/public; WORK=$OUT/work
+mkdir -p "$PUB" "$WORK" || { echo "omg-dist: cannot make $OUT" >&2; exit 1; }
+LOG=$WORK/dist.log
+say() { [ $V = 1 ] && echo "$*"; return 0; }
+log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG"; say "$*"; }
+die() { log "FAILED: $*"; echo "omg-dist: $*" >&2; exit 1; }
+sumc() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
+
+# one run at a time: a folder holding our pid; a dead pid's lock is taken over
+LOCK=$WORK/lock
+if ! mkdir "$LOCK" 2>/dev/null; then
+  old=$(cat "$LOCK/pid" 2>/dev/null || echo 0)
+  if [ "$old" != 0 ] && kill -0 "$old" 2>/dev/null; then log "skipped: another run (pid $old) is in progress"; exit 0; fi
+  echo $$ > "$LOCK/pid" 2>/dev/null || die "cannot take over the lock at $LOCK"
+else echo $$ > "$LOCK/pid"; fi
+TMP=$WORK/tmp.$$
+trap 'rm -rf "$TMP"; rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+mkdir -p "$TMP"
+
+# the source: a bare mirror of SRC, fetched
+M=$WORK/src.git
+if [ ! -d "$M" ]; then git clone --quiet --bare "$SRC" "$M" 2>"$TMP/git.err" || die "clone of $SRC failed: $(tail -n 1 "$TMP/git.err")"
+else git -C "$M" fetch --quiet --prune "$SRC" "+refs/heads/*:refs/heads/*" "+refs/tags/*:refs/tags/*" 2>"$TMP/git.err" || die "fetch from $SRC failed: $(tail -n 1 "$TMP/git.err")"; fi
+rev=$(git -C "$M" rev-parse --verify "$REF^{commit}" 2>/dev/null) || die "no commit for $REF"
+rev12=$(printf %s "$rev" | cut -c1-12)
+ct=$(git -C "$M" show -s --format=%ct "$rev")
+stamp=$(date -u -d "@$ct" +%Y%m%d-%H%M%S 2>/dev/null || date -u -r "$ct" +%Y%m%d-%H%M%S)
+version=$(git -C "$M" show "$rev:debian/changelog" 2>/dev/null | sed -n '1s/^obsmage (\([^)]*\)).*/\1/p')
+[ -n "$version" ] || version=0
+case $version in *[!A-Za-z0-9.+~-]*) die "debian/changelog's version ($version) is not a plain version" ;; esac
+name=$CHANNEL-$version-$stamp-$rev12
+key=$CHANNEL:$rev12:$version
+
+cur=
+[ -f "$PUB/channel.json" ] && cur=$(sed -n 's/^  "key": "\([^"]*\)",\{0,1\}$/\1/p' "$PUB/channel.json")
+if [ "$cur" = "$key" ] && [ -f "$PUB/$name.tar.gz" ] && [ $FORCE = 0 ]; then say "nothing new ($key)"; exit 0; fi
+if [ $DRY = 1 ]; then echo "would build $name ($key) from $SRC"; exit 0; fi
+log "building $name from $SRC at $rev"
+
+# 1. the source tarball
+git -C "$M" archive --format=tar --prefix="$name/" "$rev" > "$TMP/src.tar" || die "git archive failed"
+gzip -n -9 < "$TMP/src.tar" > "$TMP/$name.tar.gz" || die "gzip failed"
+mkdir -p "$TMP/x" && tar -xzf "$TMP/$name.tar.gz" -C "$TMP/x" || die "the tarball does not unpack"
+"$PY" "$here/secret-scan.py" "$TMP/x" > "$TMP/scan.out" 2>&1 || die "secret-scan refused the tarball: $(head -n 3 "$TMP/scan.out" | tr '\n' ' ')"
+
+# 2. the Debian package, when it can be built here
+debname=
+want_deb=0
+if [ "$DEB" = yes ]; then want_deb=1
+elif [ "$DEB" = auto ] && command -v dpkg-buildpackage >/dev/null 2>&1 && (cd "$TMP/x/$name" && dpkg-checkbuilddeps >/dev/null 2>&1); then want_deb=1; fi
+if [ $want_deb = 1 ]; then
+  dver="$version+git$(printf %s "$stamp" | tr - .).$(printf %s "$rev" | cut -c1-7)"
+  b=$TMP/x/$name
+  { printf 'obsmage (%s) unstable; urgency=low\n\n  * Snapshot of %s at %s, built by omg-dist.\n\n -- Corwin Brust <corwin@bru.st>  %s\n\n' \
+      "$dver" "$REF" "$rev" "$(LC_ALL=C date -u -d "@$ct" '+%a, %d %b %Y %H:%M:%S +0000' 2>/dev/null || LC_ALL=C date -u -r "$ct" '+%a, %d %b %Y %H:%M:%S +0000')"
+    cat "$b/debian/changelog"; } > "$TMP/changelog" && mv "$TMP/changelog" "$b/debian/changelog"
+  (cd "$b" && SOURCE_DATE_EPOCH=$ct dpkg-buildpackage -us -uc -b) > "$WORK/deb-build.log" 2>&1 || die "the Debian build failed (see $WORK/deb-build.log)"
+  arch=$(dpkg --print-architecture 2>/dev/null || echo amd64)
+  debname=obsmage_${dver}_$arch.deb
+  [ -s "$TMP/x/$debname" ] || die "dpkg-buildpackage made no $debname"
+  mkdir -p "$TMP/d" && dpkg-deb -x "$TMP/x/$debname" "$TMP/d" || die "the package does not unpack"
+  "$PY" "$here/secret-scan.py" "$TMP/d" > "$TMP/scan.out" 2>&1 || die "secret-scan refused the package: $(head -n 3 "$TMP/scan.out" | tr '\n' ' ')"
+  mv "$TMP/x/$debname" "$TMP/$debname"
+fi
+
+# 3. stage: bundles first, then their record, then SHA256SUMS, then the feed, last
+[ ! -e "$PUB/$name.tar.gz" ] || [ $FORCE = 1 ] || die "$name.tar.gz is already staged with another feed key"
+for f in "$name.tar.gz" ${debname:+"$debname"}; do
+  cp "$TMP/$f" "$PUB/.$f.part" && mv -f "$PUB/.$f.part" "$PUB/$f" || die "could not write $f into $PUB"
+done
+sha=$(sumc "$PUB/$name.tar.gz" | cut -d' ' -f1); size=$(wc -c < "$PUB/$name.tar.gz" | tr -d ' ')
+art=$name.tar.gz; [ -n "$BASE" ] && art=$BASE/$name.tar.gz
+{
+  echo "{"
+  echo "  \"format\": \"channel/1\","
+  echo "  \"channel\": \"$CHANNEL\","
+  echo "  \"revision\": \"$rev\","
+  echo "  \"stamp\": \"$stamp\","
+  echo "  \"artifact\": \"$art\","
+  echo "  \"sha256\": \"$sha\","
+  echo "  \"key\": \"$key\","
+  echo "  \"size\": \"$size\","
+  if [ -n "$debname" ]; then
+    dsha=$(sumc "$PUB/$debname" | cut -d' ' -f1); dsize=$(wc -c < "$PUB/$debname" | tr -d ' ')
+    echo "  \"inputs\": \"git:$rev12 version:$version deb:$debname\","
+    echo "  \"deb\": \"$debname\","
+    echo "  \"deb_sha256\": \"$dsha\","
+    echo "  \"deb_size\": \"$dsize\""
+  else
+    echo "  \"inputs\": \"git:$rev12 version:$version deb:none\""
+  fi
+  echo "}"
+} > "$PUB/.$name.json.part" || die "could not write the feed"
+"$PY" "$here/chan_check.py" "$PUB/.$name.json.part" > "$TMP/chk.out" 2>&1 || die "the feed I wrote does not pass its own check: $(cat "$TMP/chk.out")"
+mv -f "$PUB/.$name.json.part" "$PUB/$name.json"
+(cd "$PUB" && ls -1 | grep -E '^obsmage[-_].*\.(tar\.gz|deb|json)$' | LC_ALL=C sort | while read -r f; do sumc "$f"; done) > "$PUB/.SHA256SUMS.part" && mv -f "$PUB/.SHA256SUMS.part" "$PUB/SHA256SUMS"
+cp "$PUB/$name.json" "$PUB/.channel.json.part" && mv -f "$PUB/.channel.json.part" "$PUB/channel.json"   # last: no reader sees a feed before its bundles
+chmod 644 "$PUB"/* 2>/dev/null
+printf '%s %s %s %s\n' "$stamp" "$rev12" "$key" "$sha" >> "$WORK/history.log"
+log "staged $name ($size bytes, sha256 $(printf %s "$sha" | cut -c1-12)...)${debname:+ and $debname}"
+
+# 4. keep the newest $KEEP releases (never fewer than 3); the newest is the one the feed names
+n=0
+for t in $(ls -1 "$PUB"/$CHANNEL-*.tar.gz 2>/dev/null | LC_ALL=C sort -r); do
+  n=$((n+1)); [ $n -gt "$KEEP" ] || continue
+  b=$(basename "$t" .tar.gz); r12=${b##*-}
+  rm -f "$t" "$PUB/$b.json"; rm -f "$PUB"/obsmage_*."$(printf %s "$r12" | cut -c1-7)"_*.deb
+  log "retired $b"
+done
+(cd "$PUB" && ls -1 | grep -E '^obsmage[-_].*\.(tar\.gz|deb|json)$' | LC_ALL=C sort | while read -r f; do sumc "$f"; done) > "$PUB/.SHA256SUMS.part" && mv -f "$PUB/.SHA256SUMS.part" "$PUB/SHA256SUMS"
+exit 0

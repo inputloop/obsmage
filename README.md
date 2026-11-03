@@ -14,6 +14,9 @@ On top of that sit plugins, each of which also installs into an upstream OBS you
 | `tools/omg_atoms.py` | Splits a whole OBS configuration into atoms and joins it back losslessly (INI byte-exact, JSON parse-equal). Credentials go to a local vault (mode 600) and are never published. Also: the `STAGES.md` roll-up, unroll with two-sided conflict detection, and the co-change ledger. Tested on a real 1.6 MB, 27,800-atom setup. |
 | `tools/omg_compose.py` | Multi-monitor composer: audits which captures bind to a display by index (fragile) or by stable id, rebinds them, and keeps your screen-map scenes current. Never deletes; hides and reports. |
 | `packaging/healer/omg-heal` | The build healer: plan, build and heal Debian and source builds, following `main` (the default), project meta, tags, or signed tags only. |
+| `packaging/healer/omg-load-check` | The test instance: after every good heal, the newest package's plugin is loaded in this host's OBS Studio under a virtual display, in a throwaway HOME, and the result recorded. |
+| `packaging/dist/omg-dist` | The distribution pipeline: from one commit, a reproducible source tarball and the Debian package, each with its sha256, named in a channel feed; every bundle is scanned for credentials before it is staged. Served at https://obsmage.com/dist/. |
+| `site/` | https://obsmage.com, built by our own toolchain, with a browser demo that splits an invented OBS setup into atoms and joins it back, byte for byte. `site/README.md`. |
 
 ## What is designed, not built
 
@@ -42,11 +45,14 @@ sh tests/e2e.sh                                 # POSIX sh end-to-end, against t
 sh tests/e2e.sh --prove-red                     # shows the suite can fail
 sh tests/e2e-healer.sh
 sh tests/e2e-packaging.sh                       # debian/ and the user-mode healer units
+sh tests/e2e-dist.sh                            # the distribution pipeline (tests/test_dist.py is its second language)
+sh tests/e2e-loadcheck.sh                       # the test instance, against a fake OBS
+sh site/tests/run.sh                            # the site: static, JS-against-Python vectors, install, browser
 python3 -m unittest tests/test_windows_py38.py  # Windows / Python 3.8 cases
 ```
 
 Each shell suite takes `--prove-red` (the healer's: `HEAL_PROVE_RED=1`); the Python tests take
-`OMG_PROVE_RED=1`. All of it runs on Python 3.8 (Avalon's Windows Python).
+`OMG_PROVE_RED=1`; `site/tests/run.sh --prove-red` plants a fault for each of the site's promises. All of it runs on Python 3.8 (Avalon's Windows Python).
 
 ## How this tree is kept
 

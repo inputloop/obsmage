@@ -1,0 +1,20 @@
+[Unit]
+Description=obsmage distribution pipeline (omg-dist): bundles, sha256 and the channel feed, staged
+Documentation=file://%h/.local/share/doc/obsmage/PACKAGING.md
+After=network-online.target
+ConditionPathExists=%h/.config/obsmage/dist.env
+
+[Service]
+Type=oneshot
+# dist.env sets DIST_OUT (the staging folder, e.g. /var/lib/obsmage-dist, owned by this user) and
+# DIST_BASE_URL (where its public/ is served, when it is); see omg-dist's header for the rest.
+EnvironmentFile=%h/.config/obsmage/dist.env
+ExecStart=/bin/sh %h/.local/lib/obsmage/dist/omg-dist -v
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h
+NoNewPrivileges=yes
+UMask=0022
+
+# Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later
+# Mentat (for Corwin, claude-opus-5-5)

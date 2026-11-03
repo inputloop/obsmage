@@ -3,6 +3,8 @@ Description=obsmage build-and-heal (omg-heal heal), as an ordinary user
 Documentation=file://%h/.local/share/doc/obsmage/PACKAGING.md
 After=network-online.target
 ConditionPathExists=%h/.config/obsmage/heal.conf
+# after every good run (built or up to date), check that the package's plugin still loads in OBS
+OnSuccess=obsmage-loadcheck.service
 
 [Service]
 Type=oneshot

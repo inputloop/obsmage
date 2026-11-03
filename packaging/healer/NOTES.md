@@ -17,10 +17,17 @@ Set `WORK=/var/lib/obsmage-heal` (the unit's `StateDirectory`). Install the buil
 ## One user, no root (systemd --user)
 
     install -D -m 0755 omg-heal ~/.local/lib/obsmage/omg-heal
+    install -D -m 0755 omg-load-check ~/.local/lib/obsmage/omg-load-check
     install -D -m 0644 heal.conf.example ~/.config/obsmage/heal.conf     # then edit SRC and WORK
-    install -D -m 0644 -t ~/.config/systemd/user user/obsmage-heal.service user/obsmage-heal.timer
+    install -D -m 0644 -t ~/.config/systemd/user user/obsmage-heal.service user/obsmage-heal.timer user/obsmage-loadcheck.service
     systemctl --user daemon-reload && systemctl --user enable --now obsmage-heal.timer
     sudo loginctl enable-linger "$USER"      # only if it should run while you are logged out
+
+After every good run the user service starts `obsmage-loadcheck.service`: `omg-load-check` unpacks
+the newest package (never installs it), starts OBS Studio under a virtual display in a throwaway HOME
+with only obsmage-core added, waits for the plugin's "loaded" line, then stops OBS and everything it
+started as one process group and removes the HOME. It needs `obs-studio`, `xvfb` and `xauth`;
+`WORK/state/load-check` and `load.tsv` say what happened. This is the test instance on gw33.
 
 Same healer, same follow modes; the units drop the system unit's `User=`, `StateDirectory=` and
 sandbox options, which a user manager cannot use. Undo: `systemctl --user disable --now

@@ -25,7 +25,7 @@ import argparse, hashlib, json, os, re, shutil, sys, tempfile, time
 
 SECRET_KEY = re.compile(
     r'(?i)^(token|refreshtoken|refresh_token|access_token|authsecret|authsalt|password|passwd|'
-    r'key|stream_?key|secret|.*_secret|.*_token|bearer.*|server_password|apikey|api_key)$')
+    r'key|stream_?key|secret|.*_secret|.*_token|bearer.*|server_?password|apikey|api_key)$')
 DEVICE_KEY = re.compile(r'(?i)^(monitor_id|device_id|video_device_id|audio_device_id|'
                         r'monitoringdeviceid|uuid|cookieid|monitor_wgc)$')
 PATH_VAL = re.compile(r'^([A-Za-z]:\\|/home/|/Users/|~/|\\\\)')

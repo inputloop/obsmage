@@ -1,0 +1,9 @@
+{
+    "type": "rtmp_custom",
+    "settings": {
+        "server": "rtmp://live.example.invalid/app",
+        "use_auth": false,
+        "bwtest": false,
+        "key": "FAKE_stream_key_000000"
+    }
+}

@@ -52,6 +52,10 @@ class Atoms(unittest.TestCase):
         self.assertEqual(A.classify('/settings/monitor_id', '"x"'), 'device')
         self.assertEqual(A.classify('FilePath', 'C:\\Users\\x'), 'path')
         self.assertEqual(A.classify('BaseCX', '1920'), 'plain')
+        # obs-websocket keeps its password as ServerPassword ([OBSWebSocket] in global.ini or
+        # user.ini); the rule said server_password only, so it was published (found 2026-11-02)
+        self.assertEqual(A.classify('ServerPassword', 'abcdefgh'), 'secret')
+        self.assertEqual(A.classify('server_password', 'abcdefgh'), 'secret')
 
     def test_json_pointer_edge_keys(self):
         obj = {'a/b': 1, '#x': [1, {}, []], '~t': {'': None}, 'n': 'line\nbreak = :x'}
