@@ -67,11 +67,10 @@ sleep 1
 [ $rc = 1 ] && grep -q '^result=not-loaded$' "$T/work/state/load-check" && ! pgrep -f "omg-stray-$$" >/dev/null \
   && ok "L5 not loaded: exit 1, recorded, nothing left" || red "L5 not loaded (rc=$rc)"
 
-# L6 no OBS on this host: exit 3, says so, nothing recorded as a failure of the plugin
-mkdir -p "$T/bin2"; for x in xvfb-run; do cp "$T/bin/$x" "$T/bin2/"; done
-out=$(PATH="$T/bin2:/usr/bin:/bin" sh "$LC" --conf "$T/heal.conf" 2>&1); rc=$?
-if command -v obs >/dev/null 2>&1 && [ "$(command -v obs)" != "$T/bin/obs" ]; then ok "L6 skipped (a real obs is installed here)"
-else [ $rc = 3 ] && echo "$out" | grep -q 'obs is not installed' && ok "L6 no OBS: exit 3 and said" || red "L6 no OBS (rc=$rc)"; fi
+# L6 no OBS on this host: exit 3, says so. The OBS command is named, not looked for on a pruned PATH:
+# found 2026-11-02, a host with a real /usr/bin/obs (gw33) ran it here and the package build failed.
+out=$(LOAD_OBS=omg-no-such-obs-$$ sh "$LC" --conf "$T/heal.conf" 2>&1); rc=$?
+[ $rc = 3 ] && echo "$out" | grep -q "omg-no-such-obs-$$ is not installed" && ok "L6 no OBS: exit 3 and said" || red "L6 no OBS (rc=$rc)"
 
 echo "e2e-loadcheck: $pass ok, $fail RED"
 [ $fail = 0 ]

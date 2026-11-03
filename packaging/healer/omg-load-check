@@ -9,7 +9,8 @@
 # --conf reads WORK from heal.conf (the newest obsmage_*.deb there is checked); --deb names one.
 # Writes WORK/state/load-check (key=value, the last run) and appends to WORK/state/load.tsv
 # (when, deb, result, OBS version, seconds). Prints the plugin's own log lines.
-# Settings: LOAD_SECS (60) longest wait for the plugin's "loaded" line; KEEP_TMP=1 keeps the HOME.
+# Settings: LOAD_SECS (60) longest wait for the plugin's "loaded" line; KEEP_TMP=1 keeps the HOME;
+# LOAD_OBS (obs) the OBS command.
 # Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later.
 set -u
 CONF=$HOME/.config/obsmage/heal.conf; DEB=
@@ -19,10 +20,11 @@ done
 WORK=$(sed -n 's/^WORK=//p' "$CONF" 2>/dev/null | tail -n 1)
 [ -n "$WORK" ] || WORK=$HOME/obsmage-heal
 SECS=${LOAD_SECS:-60}
+OBS=${LOAD_OBS:-obs}
 if [ -z "$DEB" ]; then DEB=$(ls -1t "$WORK"/obsmage_*.deb 2>/dev/null | head -n 1); fi
 [ -n "$DEB" ] && [ -s "$DEB" ] || { echo "omg-load-check: no obsmage package in $WORK (has the healer built one?)" >&2; exit 1; }
-for t in obs xvfb-run dpkg-deb setsid; do
-  command -v $t >/dev/null 2>&1 || { echo "omg-load-check: $t is not installed; nothing checked" >&2; exit 3; }
+for t in "$OBS" xvfb-run dpkg-deb setsid; do
+  command -v "$t" >/dev/null 2>&1 || { echo "omg-load-check: $t is not installed; nothing checked" >&2; exit 3; }
 done
 mkdir -p "$WORK/state"
 T=$(mktemp -d "${TMPDIR:-/tmp}/omg-load.XXXXXX")
@@ -41,12 +43,12 @@ mkdir -p "$P/bin/64bit" "$P/data"
 cp "$so" "$P/bin/64bit/"
 d=$(find "$T/x" -type d -path '*obs-plugins/obsmage-core' -not -path '*/lib/*' | head -n 1)
 [ -n "$d" ] && cp -R "$d/." "$P/data/"
-ver=$(obs --version 2>/dev/null | head -n 1)
+ver=$("$OBS" --version 2>/dev/null | head -n 1)
 
 # OBS in its own process group (setsid), so it and every child can be stopped together
 start=$(date +%s)
 ( cd "$T/home" && HOME=$T/home XDG_CONFIG_HOME=$T/home/.config LIBGL_ALWAYS_SOFTWARE=1 \
-  exec setsid sh -c 'echo $$ > "$1/pg"; exec xvfb-run -a -s "-screen 0 1280x800x24" obs --multi --disable-updater --disable-shutdown-check --verbose' sh "$T" \
+  exec setsid sh -c 'echo $$ > "$1/pg"; exec xvfb-run -a -s "-screen 0 1280x800x24" "$2" --multi --disable-updater --disable-shutdown-check --verbose' sh "$T" "$OBS" \
   > "$T/obs-stdout.txt" 2>&1 ) &
 i=0; while [ ! -s "$T/pg" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
 pg=$(cat "$T/pg" 2>/dev/null)
