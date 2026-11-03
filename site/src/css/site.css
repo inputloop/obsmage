@@ -91,7 +91,7 @@ textarea { font-family: var(--mono); font-size: 14px; width: 100%; }
 .splitfig figcaption { grid-column: 1 / -1; margin-top: var(--s2); }
 .sf-col { border: 1px solid var(--border); background: var(--canvas-dim); min-width: 0; }
 .sf-k { display: block; font: 300 12px/20px var(--field); text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-dim); padding: var(--s1) var(--s3); border-bottom: 1px solid var(--border); }
-.sf-pre { margin: 0; padding: var(--s3); font-size: 13px; line-height: 22px; overflow-x: auto; white-space: pre; }
+.sf-pre { margin: 0; padding: var(--s3); font-size: 13px; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .sf-atoms { color: var(--text-alt); }
 .sf-secret { color: var(--magenta); }
 .sf-arrow { font: 28px/1 var(--letter); color: var(--text-dim); }

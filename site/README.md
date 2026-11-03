@@ -34,6 +34,13 @@ files, no framework, nothing from another host. `build.py` writes `public/` (wha
   is public; publish its releases"), so the line was set to `open` the same evening.
 - To take `/dist/` down: set `releases: closed`, rebuild, install. Nothing staged is deleted.
 
+## Live since 2026-11-03 00:26 UTC
+
+Built on gw33 from the public repositories (obsmage `c6218a5`, topology `e524fe8`), installed with
+`deploy/install.sh` and `deploy/install-tls.sh`. The certificate (Let's Encrypt, both names, renewed by
+certbot's timer) was read from outside on Corwin's machine; `site/tests/live.cjs` checked the served
+site at three widths in both schemes (82 checks); the other sites on gw33 answered the same before and after.
+
 ## Build, check, install
 
     TOPOLOGY_DIR=../topology python3 site/build.py      # writes site/public and site/generated

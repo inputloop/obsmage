@@ -52,7 +52,7 @@ mkdir -p "$2"; [ $del = 1 ] && find "$2" -mindepth 1 -delete
 cp -a "$1". "$2"
 R
 fi
-chmod +x "$T/bin/"*
+for f in "$T/bin/"*; do [ -L "$f" ] || chmod +x "$f"; done   # never chmod through the link to the real rsync
 export PATH="$T/bin:$PATH"
 # another site on the same host, which must not change
 echo "server { server_name corwin.cloud; }" > "$T/nginx/sites-available/corwin.cloud"
