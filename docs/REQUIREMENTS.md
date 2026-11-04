@@ -5,7 +5,7 @@ in this tree. **Designed** means a document says how. **Open** means neither yet
 
 | # | Requirement | State | Where |
 |---|---|---|---|
-| R1 | A bespoke multiplatform OBS (Linux, Windows, macOS) | Designed | `docs/PACKAGING.md` |
+| R1 | A bespoke multiplatform OBS (Linux, Windows, macOS) | Designed. **Windows, the shortest path, built** (2026-11-04): an unsigned installer puts the core plugin and the tools into an OBS Studio already installed; in CI it finds OBS, libobs 32.1.0 and 33.0.1 load the plugin, and OBS Studio itself logs it loaded (evidence below). Not published. The bespoke Windows build of OBS itself is designed only | `docs/PACKAGING.md`, `packaging/windows/` |
 | R2 | Distribution packaging first. Carry our patches in-tree against upstream versions; prefer what upstream already does well; offer patches upstream when ready, while still using our own copy | Designed | `docs/PACKAGING.md`, `packaging/` |
 | R3 | A literate taxonomy over OBS configuration: a total wrap on the OBS API and config | Built (config); Open (API) | `tools/omg_atoms.py`, `STAGES.md`, `CONVENTIONS.md` |
 | R4 | Our own features as OBS plugins | Skeleton; **compiles, links and loads** in OBS Studio 32.1.0 (Ubuntu 26.04, gw33, 2026-11-01; evidence below), and since 2026-11-02 that is **re-checked after every heal** by `omg-load-check` (the test instance). Its menu entries are not yet clicked and do nothing but log | `plugin/obsmage-core/`, `packaging/healer/omg-load-check` |
@@ -54,6 +54,37 @@ Nothing was left running and no throwaway HOME was left. `omg-dist` then staged
 `obsmage-0.0.1-20261103-002239-c6218a53f11f.tar.gz` (sha256 `2f4ee5e1…3afd40`) and
 `obsmage_0.0.1+git20261103.002239.c6218a5_amd64.deb` (sha256 `e3d6f77e…42393d`); a second, clean
 build of the same commit in another folder gave both files byte for byte.
+
+## Evidence: R1, Windows, the shortest path (2026-11-04, UTC)
+
+GitHub Actions run 41825389557 (https://github.com/inputloop/obsmage/actions/runs/41825389557) at
+`2f60d46`. The Linux job built `obsmage-0.0.1-20261104-115914-2f60d465c329-windows-x64-setup.exe`
+(sha256 `ec90f120…88de0cdb`) and `.zip` (sha256 `4cc6dc40…dae0f834`); a build of the same commit on
+another machine gave both byte for byte. `tests/e2e-windows.sh`: 12 ok; `--prove-red`: each check green
+alone, then 16 planted faults, each red.
+
+For each of OBS Studio 32.1.0 and 33.0.1, installed by its own installer (sha256 as pinned, fetched from
+the GitHub release) into `C:\Tools\OBS Studio`, which both registry views then named: our installer
+refused an empty folder (exit 2, nothing written), then, given no folder, installed there by itself, all
+seven files byte for byte with the zip. libobs loaded the plugin from there (`obs_load_check.py`):
+
+    obs_load_check: libobs 33.0.1 from C:\Tools\OBS Studio\bin\64bit
+      libobs debug   Loading module: obsmage-core.dll
+      libobs info    [obsmage-core] version 0.0.1
+      ok   opened (MODULE_SUCCESS)
+      ok   its locale answered from C:\Tools\OBS Studio\data\obs-plugins\obsmage-core (b'obsmage: compose screen maps')
+    obs_load_check: LOADED
+
+and OBS Studio itself (`obs64.exe`, on the runner's Microsoft Basic Render Driver through D3D11) logged:
+
+    12:01:27.155: Loading module: obsmage-core.dll
+    12:01:27.155: [obsmage-core] version 0.0.1
+    12:01:27.424: [obsmage-core] loaded; display-binding audit runs here (read-only)
+
+(33.0.1; 32.1.0 the same at 12:01:34–35). The uninstaller then left the OBS folder exactly as a snapshot
+taken before our install (2245 entries on 32.1.0, 2404 on 33.0.1), and both checkers' prove-red went red
+on a planted installer. Not shown: the wizard pages on a screen (every Windows run here was silent), and
+what SmartScreen says on a person's machine.
 
 ## Additions proposed by Mentat (not yet blessed)
 

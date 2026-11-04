@@ -29,7 +29,20 @@ bespoke" and "start unsigned". The bespoke Windows build of OBS itself is writte
 - One version: the plugin's version string now comes from CMake, and omg-win refuses to build when
   `CMakeLists.txt` and `debian/changelog` disagree.
 - Checks: `tests/e2e-windows.sh` (sh), `tests/windows_pe_check.pl` (Perl), and on Windows
-  `.github/workflows/windows.yml` with `packaging/windows/obs_load_check.py`.
+  `.github/workflows/windows.yml` with `packaging/windows/installer_check.py` and `obs_load_check.py`.
+
+**Got past our tests, then caught (CI, three runs):**
+- Run 1 (`5f11d55`): W5 went red on the runner only. Its awk is gawk, which drops `\o` from a `-v`
+  value, so the NSIS data folder lost its backslashes; here awk is mawk. Backslashes now become slashes
+  before awk, and W5 reads the script with every awk at hand. Fixing it showed that W5 run alone was red
+  with nothing planted (it read a list only W4 made), so its plants could have gone red for that reason:
+  `--prove-red` now runs each check alone, unplanted, and requires green first (`a13830f`).
+- Run 2 (`a13830f`): all held on 32.1.0, and OBS itself logged the plugin loaded; on 33.0.1 the
+  uninstall check went red. OBS 33's installer makes an empty `obs-plugins\`, and our uninstaller, removing
+  that folder when empty, would have deleted something OBS made. The installer now records which plugin
+  folders it made, and the uninstaller removes only those; CI compares OBS's whole folder with a snapshot,
+  and a planted installer shows those checks fail (`2f60d46`).
+- Run 3 (`2f60d46`, 41825389557): everything held on both. Evidence in `docs/REQUIREMENTS.md`.
 
 **Judged:** the zip ships beside the installer for people whose machines refuse unsigned programs.
 Publishing (omg-dist's feed, obsmage.com/dist) waits for Corwin's yes.
