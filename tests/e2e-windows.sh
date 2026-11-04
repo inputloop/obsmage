@@ -17,6 +17,11 @@ here=$(cd "$(dirname "$0")" && pwd); top=$(dirname "$here")
 if [ "${1:-}" = --prove-red ]; then
   t=$(mktemp -d); bad=0
   WIN_OBS_CACHE=${WIN_OBS_CACHE:-$t/obs-headers}; export WIN_OBS_CACHE
+  # each check alone, nothing planted, must be green; else a plant could "go red" for some other reason
+  for c in W1 W2 W3 W4 W5 W6 W7 W8 W9 W10 W11 W12; do
+    ONLY=$c sh "$0" > "$t/log" 2>&1 || { echo "BASELINE RED  $c alone, nothing planted ($(grep -m1 '^RED' "$t/log" | cut -c1-80))"; bad=1; }
+  done
+  [ $bad = 0 ] && echo "baseline      each check alone is green with nothing planted"
   plant() {  # name file sed-expr checks
     rm -rf "$t/pkg"; cp -R "$top/packaging" "$t/pkg"
     sed "$3" "$t/pkg/$2" > "$t/x" && cat "$t/x" > "$t/pkg/$2"
@@ -73,6 +78,8 @@ P=$T/a/public; exe=$P/$name-setup.exe; zip=$P/$name.zip
 build "$SRC" "$rev" "$T/a"; rc=$?
 mkdir -p "$T/z" "$T/n"
 unzip -q "$zip" -d "$T/z" 2>/dev/null; 7z x -y -o"$T/n" "$exe" >/dev/null 2>&1
+(cd "$T/z" && find . -type f | LC_ALL=C sort) > "$T/z.list"
+(cd "$T/n" && find . -type f ! -path './$PLUGINSDIR/*' ! -name uninstall-obsmage.exe | LC_ALL=C sort) > "$T/n.list"
 dll=$T/z/obs-plugins/64bit/obsmage-core.dll
 
 if want W1; then
@@ -95,8 +102,6 @@ if want W3; then
 fi
 
 if want W4; then
-  (cd "$T/z" && find . -type f | LC_ALL=C sort) > "$T/z.list"
-  (cd "$T/n" && find . -type f ! -path './$PLUGINSDIR/*' ! -name uninstall-obsmage.exe | LC_ALL=C sort) > "$T/n.list"
   b=0; while read -r f; do cmp -s "$T/z/$f" "$T/n/$f" || b=1; done < "$T/z.list"
   [ -s "$T/z.list" ] && cmp -s "$T/z.list" "$T/n.list" && [ $b = 0 ] && [ -f "$T/n/data/obs-plugins/obsmage-core/uninstall-obsmage.exe" ] \
     && ok "W4 the installer carries the stage byte for byte, plus its uninstaller ($(wc -l < "$T/z.list") files)" \
@@ -105,21 +110,29 @@ fi
 
 if want W5; then
   nsi=$PKG/windows/obsmage.nsi
-  data=$(sed -n 's/^!define DATA "\(.*\)"$/\1/p' "$nsi")
-  awk -v data="$data" '
+  # backslashes become slashes before awk reads anything: awks differ on backslashes (gawk drops "\o" from -v)
+  data=$(sed -n 's/^!define DATA "\(.*\)"$/\1/p' "$nsi" | tr '\\' '/')
+  prog='
     { gsub(/\$[{]DATA[}]/, data) }
-    /^[ \t]*SetOutPath "\$INSTDIR/ { s = $0; sub(/^[^"]*"\$INSTDIR\\?/, "", s); sub(/".*$/, "", s); out = s }
+    /^[ \t]*SetOutPath "\$INSTDIR/ { s = $0; sub(/^[^"]*"\$INSTDIR\/?/, "", s); sub(/".*$/, "", s); out = s }
     /^[ \t]*File[ \t]/ {
       s = $0; sub(/^[^"]*"/, "", s); sub(/".*$/, "", s)
-      if ($0 ~ /\/oname/ || s !~ /^\$[{]STAGE[}]\\/ || s ~ /\\\.\.\\/) { print "OUTSIDE " s; next }
-      sub(/^\$[{]STAGE[}]\\/, "", s); n = split(s, p, /\\/); d = (out == "" ? "" : out "\\") p[n]
+      if ($0 ~ /\/oname/ || s !~ /^\$[{]STAGE[}]\// || s ~ /\/\.\.\//) { print "OUTSIDE " s; next }
+      sub(/^\$[{]STAGE[}]\//, "", s); n = split(s, p, "/"); d = (out == "" ? "" : out "/") p[n]
       print (d == s ? "FILE " s : "MOVED " s " to " d)
     }
-    /^[ \t]*Delete "\$[{]UN_OBS[}]\\/ { s = $0; sub(/^[^"]*"\$[{]UN_OBS[}]\\/, "", s); sub(/".*$/, "", s); print "DELETE " s }
-  ' "$nsi" | tr '\\' '/' > "$T/nsi.list"
+    /^[ \t]*Delete "\$[{]UN_OBS[}]\// { s = $0; sub(/^[^"]*"\$[{]UN_OBS[}]\//, "", s); sub(/".*$/, "", s); print "DELETE " s }
+  '
+  tr '\\' '/' < "$nsi" | awk -v data="$data" "$prog" > "$T/nsi.list"
+  b=
+  for a in mawk gawk nawk original-awk; do  # every awk at hand must read the script the same way
+    command -v "$a" >/dev/null 2>&1 || continue
+    tr '\\' '/' < "$nsi" | "$a" -v data="$data" "$prog" > "$T/nsi.$a" 2>&1
+    cmp -s "$T/nsi.list" "$T/nsi.$a" || b="$b $a reads the script differently;"
+  done
   sed -n 's/^FILE //p' "$T/nsi.list" | LC_ALL=C sort > "$T/f.list"
   sed 's#^\./##' "$T/z.list" > "$T/zs.list"
-  b=; grep -q '^\(OUTSIDE\|MOVED\) ' "$T/nsi.list" && b="$b $(grep -m1 '^\(OUTSIDE\|MOVED\) ' "$T/nsi.list");"
+  grep -q '^\(OUTSIDE\|MOVED\) ' "$T/nsi.list" && b="$b $(grep -m1 '^\(OUTSIDE\|MOVED\) ' "$T/nsi.list");"
   cmp -s "$T/f.list" "$T/zs.list" || b="$b installs other files than were staged;"
   while read -r f; do grep -qx "DELETE $f" "$T/nsi.list" || b="$b the uninstaller leaves $f;"; done < "$T/f.list"
   for f in obs-plugins/64bit/obsmage-core.dll data/obs-plugins/obsmage-core/locale/en-US.ini; do grep -qx "$f" "$T/f.list" || b="$b no $f;"; done
