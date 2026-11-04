@@ -116,10 +116,79 @@ fewer than 3) and does nothing when the commit has not moved. On gw33 it runs as
 `public/` at https://obsmage.com/dist/ while `site/site.conf` says `releases: open`.
 Checked by `tests/e2e-dist.sh` (sh) and `tests/test_dist.py` (Python); `--prove-red` plants nine faults.
 
+## Windows: the shortest path (2026-11-04)
+
+Corwin, 2026-11-04: "OSBMage on Windows: shortest path then full bespoke" and "start unsigned". The
+shortest path puts obsmage into an OBS Studio the person already has; it does not build OBS.
+
+- **Route.** `packaging/windows/omg-win` (POSIX sh, on any Linux host) cross-builds `plugin/obsmage-core`
+  with MinGW-w64 by the plugin's own `CMakeLists.txt`. Its two `find_package` calls are answered by
+  `packaging/windows/sdk/`: OBS Studio's own headers at the commit pinned in `pins.env` (tag 32.1.0; only
+  `libobs/` and `frontend/api/` are fetched), and import libraries that `dlltool` makes from `obs.def` and
+  `obs-frontend-api.def`, which name the nine OBS functions the plugin calls. Why not MSVC on a Windows
+  runner, the way obsproject's plugin template builds: this way it builds and is tested on Linux (here,
+  and on gw33 beside omg-dist), it needs no OBS download to build, and every tool in it is free software
+  (GCC, binutils, NSIS). A Windows machine is needed only to show the plugin loads.
+- **New calls into OBS.** One fails the link ("undefined reference") until its name is added to the .def
+  file. The tests check that every name there is an `EXPORT` in OBS's headers at the pin; CI loads the
+  plugin into the real `obs.dll`.
+- **Which OBS.** libobs refuses a module built for a newer major.minor, so a plugin built against 32.1
+  loads in OBS Studio 32.1 and later. CI loads it in 32.1.0 and 33.0.1.
+- **Layout.** `obs-plugins\64bit\obsmage-core.dll` and `data\obs-plugins\obsmage-core\` (locale, `tools\`,
+  `COPYING`, `COPYING.LESSER`, `README-windows.txt`, the uninstaller) inside the OBS Studio folder. OBS 32
+  loads plugins from there; OBS 33 still does (its plugin manager calls it the legacy root path), though
+  its own plugins moved to `core\` and it prefers `%ProgramData%\obs-studio\plugins\<name>\` for others.
+- **Finding OBS Studio.** The folder its installer records (`HKLM\SOFTWARE\OBS Studio`, 32-bit view, then
+  64-bit), then `%ProgramFiles%\obs-studio`; otherwise the folder page says it was not found and the
+  person browses. A folder without `bin\64bit\obs64.exe` is refused: in the wizard Next stays off;
+  silently (`/S`) it exits 2 and writes nothing.
+- **The installer.** NSIS 3 (zlib licence; OBS Studio's own installer is NSIS too). The licence page
+  presents the GPL as what it is: no "I agree", only Next. Unsigned: SmartScreen warns, and the person
+  chooses "More info", then "Run anyway". It adds an entry to Settings, Apps. The uninstaller removes
+  its files by name and folders only when empty (the ones OBS 33 lacks included), and leaves OBS Studio
+  and its settings alone.
+- **The same shape as omg-dist.** The version is debian/changelog's (the plugin's `CMakeLists.txt` must
+  agree, and the plugin's version string comes from CMake). Names come from the commit:
+  `obsmage-<version>-<stamp>-<rev12>-windows-x64-setup.exe` and `.zip`, each with a `.sha256` beside
+  it. `secret-scan.py` passes over the whole stage before the installer and the zip are made from it.
+  The build is reproducible: two builds of a commit give the same bytes, and a rebuild that differs from
+  what is staged fails the run.
+- **Checked by** `tests/e2e-windows.sh` (sh; `--prove-red` plants a fault for each check) and
+  `tests/windows_pe_check.pl` (Perl, reads the DLL itself); on Windows by `.github/workflows/windows.yml`
+  with `packaging/windows/obs_load_check.py`.
+- **Not yet:** wiring into omg-dist's feed and obsmage.com/dist (Corwin's yes), signing, ARM64, a
+  per-user install without administrator rights.
+
+## Windows: the bespoke build (later; written down, not built)
+
+What "obsmage IS OBS" would take on Windows:
+
+1. **OBS Studio from source.** MSVC (Visual Studio 2022) with obs-studio's CMake preset `windows-x64`;
+   upstream does not build OBS itself with MinGW. obs-deps and Qt 6 come as prebuilt archives that
+   obs-studio's `buildspec.json` already pins by hash, or we build obs-deps ourselves and pin our own
+   commit. Each build is long; OBS's own CI caches the dependencies, and ours would need to as well.
+2. **Our patch queue on Windows.** `patches/<version>/` applied as omg-heal applies it on Linux; the
+   healer is POSIX sh, so on Windows it needs Git for Windows' sh or a port.
+3. **The app owns its configuration.** obsmage-core and later plugins built in-tree, OBS run in portable
+   mode (`config\` beside the app) so the whole configuration is obsmage's atoms, and a distinct folder
+   and registry key so it can sit beside an upstream OBS Studio.
+4. **Our installer for the whole app.** OBS's installer script is not in obs-studio's tree (we did not
+   find it under `frontend/` or `cmake/windows/` at 33.0.1), so ours grows from `obsmage.nsi`, with an
+   uninstaller and updates from the channel feed (OBS's own updater off or pointed at ours).
+5. **Separate pins with their own terms:** the hardware encoders (NVENC, AMF, QSV) and the browser source
+   (CEF, large; its redistribution terms need reading first).
+6. **Signing becomes pressing.** An unsigned full OBS trips SmartScreen and antivirus far harder than a
+   small plugin installer. The options are a code-signing certificate held in hardware or a cloud signer,
+   or a free signing service for free software projects (SignPath Foundation offers one). The channel
+   feed already has a signature slot.
+7. **Tests.** The load check grows into OBS's own test suite plus an `obs64.exe` run on a runner;
+   reproducibility needs MSVC's `/Brepro` and care with PDB paths.
+
 ## Limits
 
 The healer packages but does not install build dependencies, sign packages, or publish them; omg-dist
-stages them for nginx and does not sign them either (a signature slot is in the feed's spec).
+stages them for nginx and does not sign them either (a signature slot is in the feed's spec). omg-win
+stages the Windows installer and zip and signs nothing.
 Submodules are not checked out. `--dry-run` still runs read-only git queries. The `meta` mode
 reads the first `project(...)` call in `CMakeLists.txt`; a version given by a variable is not
 resolved.

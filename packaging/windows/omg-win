@@ -1,0 +1,153 @@
+#!/bin/sh
+# omg-win -- obsmage for Windows x64, the shortest path. From one commit: the obsmage-core plugin cross-built with
+# MinGW-w64 against OBS Studio's own headers (pinned in pins.env), staged in the folder layout of an OBS Studio
+# install with the two Python tools and the licence texts, scanned for credentials, then packed two ways: an
+# unsigned NSIS installer that finds the person's OBS Studio (or lets them browse to it), and a zip of the same
+# tree. Each gets a .sha256 beside it. It stages; it does not publish, and it signs nothing.
+#
+#   omg-win [-v] [-n]         -v say what happens   -n only say what would be built
+# Settings (environment, all optional):
+#   WIN_SRC        git repository to build from           (the repository this script is in)
+#   WIN_REF        branch, tag or commit                  (HEAD)
+#   WIN_OUT        staging folder                         ($HOME/obsmage-win)
+#                  $WIN_OUT/public/   the installer, the zip, and a .sha256 beside each
+#                  $WIN_OUT/work/     private: the build log, cmake and makensis output
+#   WIN_OBS_CACHE  where the pinned OBS headers are kept  ($WIN_OUT/work/obs-headers)
+#   WIN_CC         the MinGW-w64 C compiler                (x86_64-w64-mingw32-gcc-win32, else x86_64-w64-mingw32-gcc)
+#   PYTHON         python3
+# The version is debian/changelog's (as in omg-dist); plugin/obsmage-core/CMakeLists.txt must say the same, or
+# nothing is built. The OBS headers must be at the pinned commit; a cache at any other commit is fetched again.
+# Every file that goes into the installer and the zip is in the stage, and the stage passes
+# packaging/dist/secret-scan.py before either is made.
+# Reproducible: names and file times come from the commit, the DLL carries no timestamp, makensis gets
+# SOURCE_DATE_EPOCH; a second build of a commit already staged must give the same bytes, or the run fails.
+# Exit: 0 staged; 1 failed (nothing new staged; one line in work/win.log); 3 a tool is missing; 64 usage.
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+SRC=${WIN_SRC:-$(cd "$here/../.." && pwd)}
+REF=${WIN_REF:-HEAD}
+OUT=${WIN_OUT:-$HOME/obsmage-win}
+PY=${PYTHON:-python3}
+V=0; DRY=0
+for a in "$@"; do case $a in -v) V=1 ;; -n) DRY=1 ;; *) echo "usage: omg-win [-v] [-n]" >&2; exit 64 ;; esac; done
+say() { [ $V = 1 ] && echo "$*"; return 0; }
+
+pin() { sed -n "s/^$1=//p" "$here/pins.env" | head -n 1; }
+OBS_TAG=$(pin OBS_TAG); OBS_COMMIT=$(pin OBS_COMMIT); OBS_GIT=$(pin OBS_GIT)
+if [ -z "$OBS_TAG" ] || [ -z "$OBS_GIT" ] || ! printf %s "$OBS_COMMIT" | grep -Eq '^[0-9a-f]{40}$'; then
+  echo "omg-win: pins.env needs OBS_TAG, OBS_GIT and a 40-hex OBS_COMMIT" >&2; exit 1
+fi
+
+CC=${WIN_CC:-}
+if [ -z "$CC" ]; then
+  for c in x86_64-w64-mingw32-gcc-win32 x86_64-w64-mingw32-gcc; do command -v "$c" >/dev/null 2>&1 && { CC=$c; break; }; done
+fi
+DLLTOOL=x86_64-w64-mingw32-dlltool
+missing=
+for t in git cmake make "${CC:-x86_64-w64-mingw32-gcc}" "$DLLTOOL" makensis zip "$PY"; do
+  command -v "$t" >/dev/null 2>&1 || missing="$missing $t"
+done
+if [ -n "$missing" ]; then
+  echo "omg-win: missing:$missing (Debian/Ubuntu: gcc-mingw-w64-x86-64-win32 binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev nsis cmake make zip)" >&2
+  exit 3
+fi
+
+rev=$(git -C "$SRC" rev-parse --verify "$REF^{commit}" 2>/dev/null) || { echo "omg-win: no commit for $REF in $SRC" >&2; exit 1; }
+rev12=$(printf %s "$rev" | cut -c1-12)
+ct=$(git -C "$SRC" show -s --format=%ct "$rev")
+stamp=$(date -u -d "@$ct" +%Y%m%d-%H%M%S 2>/dev/null || date -u -r "$ct" +%Y%m%d-%H%M%S)
+touchstamp=$(date -u -d "@$ct" +%Y%m%d%H%M.%S 2>/dev/null || date -u -r "$ct" +%Y%m%d%H%M.%S)
+version=$(git -C "$SRC" show "$rev:debian/changelog" 2>/dev/null | sed -n '1s/^obsmage (\([^)]*\)).*/\1/p')
+case $version in ''|*[!A-Za-z0-9.+~-]*) echo "omg-win: debian/changelog's version ($version) is not a plain version" >&2; exit 1 ;; esac
+name=obsmage-$version-$stamp-$rev12-windows-x64
+if [ $DRY = 1 ]; then
+  echo "would build $name-setup.exe and $name.zip from $SRC at $rev, against OBS Studio $OBS_TAG ($OBS_COMMIT)"; exit 0
+fi
+
+PUB=$OUT/public; WORK=$OUT/work
+mkdir -p "$PUB" "$WORK" || { echo "omg-win: cannot make $OUT" >&2; exit 1; }
+LOG=$WORK/win.log
+log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG"; say "$*"; }
+die() { log "FAILED: $*"; echo "omg-win: $*" >&2; exit 1; }
+sumc() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
+TMP=$WORK/tmp.$$
+trap 'rm -rf "$TMP"' EXIT INT TERM
+rm -rf "$TMP"; mkdir -p "$TMP/src"
+log "building $name from $SRC at $rev"
+
+# 1. the source of the commit, and its one version
+git -C "$SRC" archive --format=tar "$rev" | tar -xf - -C "$TMP/src" || die "git archive of $rev failed"
+cver=$(sed -n 's/^project(obsmage-core VERSION \([^ )]*\).*/\1/p' "$TMP/src/plugin/obsmage-core/CMakeLists.txt")
+[ "$cver" = "$version" ] || die "the version disagrees: debian/changelog says $version, plugin/obsmage-core/CMakeLists.txt says ${cver:-nothing}"
+
+# 2. OBS Studio's headers at the pinned commit (only libobs/ and frontend/api/ are checked out)
+CACHE=${WIN_OBS_CACHE:-$WORK/obs-headers}
+H=$CACHE/$OBS_COMMIT
+have=$(git -C "$H" rev-parse --verify HEAD 2>/dev/null || echo none)
+if [ "$have" != "$OBS_COMMIT" ]; then
+  [ -d "$H" ] && log "OBS headers in $H are at $have, not the pin $OBS_COMMIT; fetching again"
+  rm -rf "$H" "$H.part"; mkdir -p "$H.part" || die "cannot make $H.part"
+  ( cd "$H.part" && git init -q && git sparse-checkout set --no-cone /libobs/ /frontend/api/ &&
+    git fetch -q --depth 1 --filter=blob:none "$OBS_GIT" "$OBS_COMMIT" && git checkout -q FETCH_HEAD ) > "$TMP/git.err" 2>&1 ||
+    die "could not fetch OBS Studio $OBS_TAG ($OBS_COMMIT) from $OBS_GIT: $(tail -n 1 "$TMP/git.err")"
+  mv "$H.part" "$H" || die "cannot move the OBS headers into $H"
+  have=$(git -C "$H" rev-parse --verify HEAD 2>/dev/null || echo none)
+fi
+[ "$have" = "$OBS_COMMIT" ] || die "the OBS headers are at $have, not the pinned $OBS_COMMIT"
+log "OBS Studio headers: $OBS_TAG at $OBS_COMMIT"
+
+# 3. what OBS's own build would generate: obsconfig.h (from its template) and the import libraries (from our .def)
+rc=0; beta=0
+case $OBS_TAG in *-rc*) rc=${OBS_TAG##*-rc} ;; *-beta*) beta=${OBS_TAG##*-beta} ;; esac
+mkdir -p "$TMP/sdk/include" "$TMP/sdk/lib"
+sed -e '/^#cmakedefine/d' -e "s/@OBS_RELEASE_CANDIDATE@/$rc/" -e "s/@OBS_BETA@/$beta/" "$H/libobs/obsconfig.h.in" > "$TMP/sdk/include/obsconfig.h" ||
+  die "the OBS headers have no libobs/obsconfig.h.in"
+if grep -q '@' "$TMP/sdk/include/obsconfig.h"; then die "obsconfig.h.in has a setting omg-win does not fill: $(grep '@' "$TMP/sdk/include/obsconfig.h" | head -n 1)"; fi
+for d in obs obs-frontend-api; do
+  "$DLLTOOL" -d "$here/$d.def" -l "$TMP/sdk/lib/lib$d.dll.a" 2> "$TMP/dlltool.err" || die "dlltool could not make an import library from $d.def: $(head -n 1 "$TMP/dlltool.err")"
+done
+
+# 4. the plugin, by its own CMakeLists.txt
+cmake -S "$TMP/src/plugin/obsmage-core" -B "$TMP/build" -G "Unix Makefiles" \
+  -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 -DCMAKE_C_COMPILER="$CC" -DCMAKE_BUILD_TYPE=Release \
+  -Dlibobs_DIR="$here/sdk" -Dobs-frontend-api_DIR="$here/sdk" -DOBS_SDK_LIB="$TMP/sdk/lib" \
+  -DOBS_LIBOBS_INCLUDE="$H/libobs;$TMP/sdk/include" -DOBS_FRONTEND_INCLUDE="$H/frontend/api" \
+  -DCMAKE_C_FLAGS="-ffile-prefix-map=$TMP=." -DCMAKE_MODULE_LINKER_FLAGS="-static-libgcc -Wl,--no-insert-timestamp -s" \
+  > "$WORK/cmake.log" 2>&1 && cmake --build "$TMP/build" >> "$WORK/cmake.log" 2>&1 || die "the plugin did not build (see $WORK/cmake.log)"
+[ -s "$TMP/build/obsmage-core.dll" ] || die "the build made no obsmage-core.dll"
+
+# 5. the stage: the layout of an OBS Studio folder, and nothing else
+S=$TMP/stage; D=$S/data/obs-plugins/obsmage-core
+mkdir -p "$S/obs-plugins/64bit" "$D/tools" &&
+cp "$TMP/build/obsmage-core.dll" "$S/obs-plugins/64bit/" &&
+cp -R "$TMP/src/plugin/obsmage-core/data/." "$D/" &&
+cp "$TMP/src/tools/omg_atoms.py" "$TMP/src/tools/omg_compose.py" "$D/tools/" &&
+cp "$TMP/src/COPYING" "$TMP/src/COPYING.LESSER" "$D/" || die "could not stage the files"
+sed -e "s/@VERSION@/$version/g" -e "s/@REVISION@/$rev/g" -e "s/@OBS_TAG@/$OBS_TAG/g" -e "s/@OBS_COMMIT@/$OBS_COMMIT/g" \
+  -e "s/@SOURCE_TARBALL@/obsmage-$version-$stamp-$rev12.tar.gz/g" "$here/README-windows.txt" > "$D/README-windows.txt" || die "could not write README-windows.txt"
+if grep -q '@[A-Z_]*@' "$D/README-windows.txt"; then die "README-windows.txt has a placeholder omg-win does not fill"; fi
+find "$S" -type d -exec chmod 755 {} + && find "$S" -type f -exec chmod 644 {} + &&
+TZ=UTC find "$S" -exec touch -t "$touchstamp" {} + || die "could not set the stage's modes and times"
+
+# 6. the credential scan, on everything that will ship
+OMG_TOOLS=$TMP/src/tools "$PY" "$here/../dist/secret-scan.py" "$S" > "$TMP/scan.out" 2>&1 || die "secret-scan refused the bundle: $(head -n 3 "$TMP/scan.out" | tr '\n' ' ')"
+log "secret-scan: the stage is clean"
+
+# 7. the installer and the zip, both from the stage
+v4=$(printf %s "$version" | sed 's/[^0-9.].*//' | awk -F. '{ printf "%d.%d.%d.%d", $1, $2, $3, $4 }')
+SOURCE_DATE_EPOCH=$ct makensis -V2 -INPUTCHARSET UTF8 -DVERSION="$version" -DVERSION4="$v4" -DREVISION="$rev" \
+  -DSTAGE="$S" -DOUTFILE="$TMP/$name-setup.exe" "$here/obsmage.nsi" > "$WORK/makensis.log" 2>&1 || die "makensis failed (see $WORK/makensis.log)"
+[ -s "$TMP/$name-setup.exe" ] || die "makensis made no installer"
+(cd "$S" && find . -type f | sed 's#^\./##' | LC_ALL=C sort | TZ=UTC zip -X -D -q "$TMP/$name.zip" -@) || die "zip failed"
+
+# 8. stage them, each with its .sha256; the same commit again must give the same bytes
+for f in "$name-setup.exe" "$name.zip"; do
+  if [ -f "$PUB/$f" ] && ! cmp -s "$TMP/$f" "$PUB/$f"; then die "$f is already staged with other bytes: this build is not reproducible"; fi
+  cp "$TMP/$f" "$PUB/.$f.part" && mv -f "$PUB/.$f.part" "$PUB/$f" || die "could not write $f into $PUB"
+  (cd "$PUB" && sumc "$f") > "$PUB/.$f.sha256.part" && mv -f "$PUB/.$f.sha256.part" "$PUB/$f.sha256" || die "could not write $f.sha256"
+done
+log "staged $name-setup.exe (sha256 $(cut -c1-12 "$PUB/$name-setup.exe.sha256")...) and $name.zip (sha256 $(cut -c1-12 "$PUB/$name.zip.sha256")...)"
+exit 0
+
+# Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later.
+# Mentat (for Corwin, claude-opus-5-5)

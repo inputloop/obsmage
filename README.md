@@ -16,6 +16,7 @@ On top of that sit plugins, each of which also installs into an upstream OBS you
 | `packaging/healer/omg-heal` | The build healer: plan, build and heal Debian and source builds, following `main` (the default), project meta, tags, or signed tags only. |
 | `packaging/healer/omg-load-check` | The test instance: after every good heal, the newest package's plugin is loaded in this host's OBS Studio under a virtual display, in a throwaway HOME, and the result recorded. |
 | `packaging/dist/omg-dist` | The distribution pipeline: from one commit, a reproducible source tarball and the Debian package, each with its sha256, named in a channel feed; every bundle is scanned for credentials before it is staged. Served at https://obsmage.com/dist/. |
+| `packaging/windows/omg-win` | Windows x64, the shortest path: the core plugin cross-built with MinGW-w64 against OBS Studio's own headers, an installer that puts it and the two tools into the OBS Studio you already have (it looks in the registry and Program Files, and lets you browse when that fails), and a zip of the same files; each with its sha256. Built and checked in CI (`.github/workflows/windows.yml`); not published yet. **Not signed:** Windows SmartScreen warns about the installer; choose "More info", then "Run anyway". |
 | `site/` | https://obsmage.com, built by our own toolchain, with a browser demo that splits an invented OBS setup into atoms and joins it back, byte for byte. `site/README.md`. |
 
 ## What is designed, not built
@@ -47,6 +48,7 @@ sh tests/e2e-healer.sh
 sh tests/e2e-packaging.sh                       # debian/ and the user-mode healer units
 sh tests/e2e-dist.sh                            # the distribution pipeline (tests/test_dist.py is its second language)
 sh tests/e2e-loadcheck.sh                       # the test instance, against a fake OBS
+sh tests/e2e-windows.sh                         # the Windows build, on Linux (tests/windows_pe_check.pl is its second language)
 sh site/tests/run.sh                            # the site: static, JS-against-Python vectors, install, browser
 python3 -m unittest tests/test_windows_py38.py  # Windows / Python 3.8 cases
 ```

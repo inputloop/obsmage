@@ -1,0 +1,9 @@
+; obs-frontend-api.def -- the functions of OBS Studio's obs-frontend-api.dll that obsmage-core calls (see obs.def
+; for how this file is used and checked). Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later.
+; Mentat (for Corwin, claude-opus-5-5)
+LIBRARY obs-frontend-api.dll
+EXPORTS
+  obs_frontend_add_event_callback
+  obs_frontend_add_tools_menu_item
+  obs_frontend_get_current_scene_collection
+  obs_frontend_remove_event_callback

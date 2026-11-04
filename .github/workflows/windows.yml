@@ -1,0 +1,186 @@
+# windows.yml -- obsmage for Windows x64, the shortest path (docs/PACKAGING.md, "Windows").
+#   build  (Linux)    packaging/windows/omg-win cross-builds the plugin with MinGW-w64 and packs the unsigned
+#                     installer and the zip; tests/e2e-windows.sh checks them, and shows each check can go red.
+#   load   (Windows)  for each OBS Studio in the matrix: install it with its own installer into a folder that is not
+#                     the default; our installer must refuse a folder that is not OBS Studio, then find this one by
+#                     itself; libobs must load the plugin from where it went (obs_load_check.py, and its prove-red);
+#                     OBS Studio itself runs as a witness; the uninstaller must leave OBS Studio as it was.
+# The artifacts are built and kept by the run, never published from here; publishing is Corwin's yes.
+# Every action is pinned by commit; OBS Studio's installers by sha256 (packaging/windows/pins.env).
+name: windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - plugin/**
+      - tools/omg_atoms.py
+      - tools/omg_compose.py
+      - packaging/windows/**
+      - packaging/dist/secret-scan.py
+      - tests/e2e-windows.sh
+      - tests/windows_pe_check.pl
+      - debian/changelog
+      - COPYING
+      - COPYING.LESSER
+      - .github/workflows/windows.yml
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Free toolchain (MinGW-w64, NSIS, 7-Zip)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends gcc-mingw-w64-x86-64-win32 binutils-mingw-w64-x86-64 \
+            mingw-w64-x86-64-dev nsis p7zip-full zip unzip cmake make
+          x86_64-w64-mingw32-gcc-win32 --version | head -n 1; makensis -VERSION; echo
+      - name: Build (packaging/windows/omg-win)
+        run: WIN_OUT="$RUNNER_TEMP/win" WIN_OBS_CACHE="$RUNNER_TEMP/obs-headers" sh packaging/windows/omg-win -v
+      - name: Check (tests/e2e-windows.sh), then show each check can go red
+        run: |
+          export WIN_OBS_CACHE="$RUNNER_TEMP/obs-headers"
+          sh tests/e2e-windows.sh
+          sh tests/e2e-windows.sh --prove-red
+      - name: What would be published
+        run: |
+          { echo '### obsmage for Windows x64 (unsigned; not published)'; echo '```'; cat "$RUNNER_TEMP"/win/public/*.sha256; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP"/win/public/*.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: obsmage-windows-x64
+          path: ${{ runner.temp }}/win/public/
+          if-no-files-found: error
+
+  load:
+    name: load (OBS Studio ${{ matrix.obs }})
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        obs: ["32.1.0", "33.0.1"]
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      OBS_WANT: C:\Tools\OBS Studio
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: obsmage-windows-x64
+          path: art
+      - name: Install OBS Studio ${{ matrix.obs }} with its own installer, into a folder that is not the default
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $pins = @{}
+          Get-Content packaging/windows/pins.env | Where-Object { $_ -match '^[A-Z0-9_]+=' } | ForEach-Object { $k, $v = $_ -split '=', 2; $pins[$k] = $v }
+          $v = '${{ matrix.obs }}'
+          $want = $pins['OBS_SETUP_' + ($v -replace '\.', '_') + '_SHA256']
+          if (-not $want) { throw "pins.env has no sha256 for OBS Studio $v" }
+          $f = "OBS-Studio-$v-Windows-x64-Installer.exe"
+          $from = $null
+          foreach ($u in "https://github.com/obsproject/obs-studio/releases/download/$v/$f", "https://cdn-fastly.obsproject.com/downloads/$f") {
+            try { Invoke-WebRequest -Uri $u -OutFile $f; $from = $u; break } catch { Write-Host "could not fetch $u ($_)" }
+          }
+          if (-not $from) { throw "no host served $f" }
+          $h = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+          Write-Host "fetched $f from $from; sha256 $h"
+          if ($h -ne $want) { throw "sha256 $h is not the pinned $want" }
+          $p = Start-Process -FilePath ".\$f" -ArgumentList "/S /D=$env:OBS_WANT" -Wait -PassThru
+          Write-Host "OBS Studio's installer exited $($p.ExitCode)"
+          $dir = $env:OBS_WANT
+          if (-not (Test-Path "$dir\bin\64bit\obs64.exe")) {
+            $dir = "$env:ProgramFiles\obs-studio"
+            Write-Host "::warning::OBS Studio's installer did not take /D; looking in $dir"
+          }
+          if (-not (Test-Path "$dir\bin\64bit\obs64.exe")) { throw "OBS Studio is not installed" }
+          foreach ($view in 'Registry32', 'Registry64') {
+            $k = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', $view).OpenSubKey('SOFTWARE\OBS Studio')
+            Write-Host ("HKLM\SOFTWARE\OBS Studio, {0} view: {1}" -f $view, $(if ($k) { $k.GetValue('') } else { '(no key)' }))
+          }
+          $before = (Test-Path "$dir\obs-plugins"), (Test-Path "$dir\data\obs-plugins")
+          Write-Host "before obsmage: obs-plugins exists: $($before[0]); data\obs-plugins exists: $($before[1])"
+          "OBS_DIR=$dir" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "HAD_PLUGINS=$($before[0])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "HAD_DATA_PLUGINS=$($before[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Our installer refuses a folder that is not OBS Studio
+        run: |
+          $s = (Get-ChildItem art\*-setup.exe).FullName
+          New-Item -ItemType Directory -Force C:\not-obs | Out-Null
+          $p = Start-Process -FilePath $s -ArgumentList '/S /D=C:\not-obs' -Wait -PassThru
+          if ($p.ExitCode -eq 0) { throw "it installed into a folder without bin\64bit\obs64.exe" }
+          if (Get-ChildItem -Recurse -Force C:\not-obs) { throw "it wrote into C:\not-obs" }
+          Write-Host "refused C:\not-obs (exit $($p.ExitCode)); nothing written"
+      - name: Our installer finds OBS Studio by itself and installs the staged files
+        run: |
+          $s = (Get-ChildItem art\*-setup.exe).FullName
+          $p = Start-Process -FilePath $s -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "our installer exited $($p.ExitCode)" }
+          Expand-Archive -Path (Get-ChildItem art\*.zip).FullName -DestinationPath zipped
+          $root = (Resolve-Path zipped).Path
+          Get-ChildItem -Recurse -File zipped | ForEach-Object {
+            $rel = $_.FullName.Substring($root.Length + 1)
+            $inst = Join-Path $env:OBS_DIR $rel
+            if (-not (Test-Path $inst)) { throw "not installed: $rel" }
+            if ((Get-FileHash $inst).Hash -ne (Get-FileHash $_.FullName).Hash) { throw "installed bytes differ from the zip: $rel" }
+            Write-Host "ok  $rel"
+          }
+          if (-not (Test-Path "$env:OBS_DIR\data\obs-plugins\obsmage-core\uninstall-obsmage.exe")) { throw "no uninstaller" }
+          $u = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry64').OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Uninstall\obsmage')
+          if (-not $u) { throw "no entry in Settings, Apps" }
+          Write-Host ("Apps entry: {0} {1}, in {2}" -f $u.GetValue('DisplayName'), $u.GetValue('DisplayVersion'), $u.GetValue('InstallLocation'))
+          if ($u.GetValue('InstallLocation') -ne $env:OBS_DIR) { throw "it installed into $($u.GetValue('InstallLocation')), not $env:OBS_DIR" }
+      - name: libobs loads the plugin from where the installer put it (obs_load_check.py, then its prove-red)
+        run: |
+          $ver = (Get-Content debian/changelog -TotalCount 1) -replace '^obsmage \(([^)]*)\).*', '$1'
+          python --version
+          python packaging/windows/obs_load_check.py "$env:OBS_DIR" --expect-version $ver
+          if ($LASTEXITCODE -ne 0) { throw "obs_load_check: not loaded" }
+          python packaging/windows/obs_load_check.py --prove-red "$env:OBS_DIR" --expect-version $ver
+          if ($LASTEXITCODE -ne 0) { throw "obs_load_check: prove-red failed" }
+      - name: OBS Studio itself loads it (a witness; the gate is the step above)
+        continue-on-error: true
+        run: |
+          $logs = "$env:APPDATA\obs-studio\logs"
+          $p = Start-Process -FilePath "$env:OBS_DIR\bin\64bit\obs64.exe" -WorkingDirectory "$env:OBS_DIR\bin\64bit" -ArgumentList '--verbose --multi --disable-updater --disable-shutdown-check' -PassThru
+          $deadline = (Get-Date).AddSeconds(120); $hit = $false
+          while ((Get-Date) -lt $deadline -and -not $p.HasExited) {
+            Start-Sleep -Seconds 2
+            $f = Get-ChildItem $logs -Filter *.txt -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+            if ($f -and (Select-String -Path $f.FullName -Pattern '\[obsmage-core\] loaded' -Quiet)) { $hit = $true; break }
+          }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; Start-Sleep -Seconds 3 }
+          $f = Get-ChildItem $logs -Filter *.txt -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+          if ($f) { Select-String -Path $f.FullName -Pattern 'obsmage|OBS \d|adapter|D3D11|OpenGL|Failed|Error' | Select-Object -First 60 | ForEach-Object { $_.Line } }
+          else { Write-Host "OBS Studio wrote no log in $logs" }
+          if (-not $hit) { throw "OBS Studio did not log '[obsmage-core] loaded' within 120 s" }
+      - name: The uninstaller leaves OBS Studio as it was
+        run: |
+          Get-Process obs64 -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Process -FilePath "$env:OBS_DIR\data\obs-plugins\obsmage-core\uninstall-obsmage.exe" -ArgumentList '/S' -Wait
+          $deadline = (Get-Date).AddSeconds(60)
+          while ((Test-Path "$env:OBS_DIR\data\obs-plugins\obsmage-core") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
+          foreach ($f in 'obs-plugins\64bit\obsmage-core.dll', 'data\obs-plugins\obsmage-core') { if (Test-Path "$env:OBS_DIR\$f") { throw "still there: $f" } }
+          if ($env:HAD_PLUGINS -eq 'False' -and (Test-Path "$env:OBS_DIR\obs-plugins")) { throw "obs-plugins was made by us and is still there" }
+          if ($env:HAD_DATA_PLUGINS -eq 'False' -and (Test-Path "$env:OBS_DIR\data\obs-plugins")) { throw "data\obs-plugins was made by us and is still there" }
+          if ($env:HAD_PLUGINS -eq 'True' -and -not (Test-Path "$env:OBS_DIR\obs-plugins\64bit")) { throw "OBS Studio's own obs-plugins went" }
+          if (-not (Test-Path "$env:OBS_DIR\bin\64bit\obs64.exe")) { throw "OBS Studio itself was touched" }
+          if ([Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry64').OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Uninstall\obsmage')) { throw "the Apps entry is still there" }
+          Write-Host "uninstalled: our files, the folders we made and the Apps entry are gone; OBS Studio is as it was"
+
+# Copyright 2026 INPUTLOOP; GPL-3.0-or-later OR LGPL-3.0-or-later.
+# Mentat (for Corwin, claude-opus-5-5)

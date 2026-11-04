@@ -19,6 +19,10 @@
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("obsmage-core", "en-US")
 
+#ifndef OBSMAGE_VERSION
+#error "OBSMAGE_VERSION comes from project(VERSION) in CMakeLists.txt; build with CMake"
+#endif
+
 #define LOG(level, fmt, ...) blog(level, "[obsmage-core] " fmt, ##__VA_ARGS__)
 
 static void compose_screen_maps(void *data)
@@ -49,7 +53,7 @@ bool obs_module_load(void)
 	obs_frontend_add_tools_menu_item(obs_module_text("ComposeScreenMaps"), compose_screen_maps, NULL);
 	obs_frontend_add_tools_menu_item(obs_module_text("CalibrateCameras"), calibrate_cameras, NULL);
 	obs_frontend_add_event_callback(on_event, NULL);
-	LOG(LOG_INFO, "version %s", "0.0.1");
+	LOG(LOG_INFO, "version %s", OBSMAGE_VERSION);
 	return true;
 }
 

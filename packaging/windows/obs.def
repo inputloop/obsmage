@@ -1,0 +1,12 @@
+; obs.def -- the functions of OBS Studio's obs.dll that obsmage-core calls. omg-win makes the import library
+; from it with dlltool. A new call into libobs fails at link time ("undefined reference") until its name is
+; added here. Every name is checked in OBS's headers at the pinned commit (tests/e2e-windows.sh) and against
+; the real obs.dll in CI, where libobs loads the plugin. Copyright 2026 INPUTLOOP;
+; GPL-3.0-or-later OR LGPL-3.0-or-later. Mentat (for Corwin, claude-opus-5-5)
+LIBRARY obs.dll
+EXPORTS
+  bfree
+  blog
+  obs_module_load_locale
+  text_lookup_destroy
+  text_lookup_getstr
