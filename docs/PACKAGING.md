@@ -144,9 +144,10 @@ shortest path puts obsmage into an OBS Studio the person already has; it does no
   silently (`/S`) it exits 2 and writes nothing.
 - **The installer.** NSIS 3 (zlib licence; OBS Studio's own installer is NSIS too). The licence page
   presents the GPL as what it is: no "I agree", only Next. Unsigned: SmartScreen warns, and the person
-  chooses "More info", then "Run anyway". It adds an entry to Settings, Apps. The uninstaller removes
-  its files by name and folders only when empty (the ones OBS 33 lacks included), and leaves OBS Studio
-  and its settings alone.
+  chooses "More info", then "Run anyway". It adds an entry to Settings, Apps, in which it records which
+  of OBS's plugin folders it had to make (OBS 33 has an empty `obs-plugins\` and no `64bit\` or
+  `data\obs-plugins\`). The uninstaller removes its files by name, and only those folders, only when
+  empty; OBS Studio's folder is left as it was before the install, and its settings are not touched.
 - **The same shape as omg-dist.** The version is debian/changelog's (the plugin's `CMakeLists.txt` must
   agree, and the plugin's version string comes from CMake). Names come from the commit:
   `obsmage-<version>-<stamp>-<rev12>-windows-x64-setup.exe` and `.zip`, each with a `.sha256` beside
@@ -154,8 +155,11 @@ shortest path puts obsmage into an OBS Studio the person already has; it does no
   The build is reproducible: two builds of a commit give the same bytes, and a rebuild that differs from
   what is staged fails the run.
 - **Checked by** `tests/e2e-windows.sh` (sh; `--prove-red` plants a fault for each check) and
-  `tests/windows_pe_check.pl` (Perl, reads the DLL itself); on Windows by `.github/workflows/windows.yml`
-  with `packaging/windows/obs_load_check.py`.
+  `tests/windows_pe_check.pl` (Perl, reads the DLL itself); on Windows by `.github/workflows/windows.yml`,
+  which installs OBS Studio 32.1.0 and 33.0.1 with their own installers into a non-default folder, then
+  runs `packaging/windows/installer_check.py` (refuses a non-OBS folder, finds OBS by itself, installs the
+  zip's bytes, uninstalls back to a snapshot of OBS's folder) and `packaging/windows/obs_load_check.py`
+  (libobs loads the plugin from where it went), each with a prove-red, and starts `obs64.exe` as a witness.
 - **Not yet:** wiring into omg-dist's feed and obsmage.com/dist (Corwin's yes), signing, ARM64, a
   per-user install without administrator rights.
 

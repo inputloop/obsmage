@@ -51,6 +51,21 @@ VIAddVersionKey "Comments" "Built from commit ${REVISION}"
 
 Var Found
 
+; Made KEY DIR VAR: VAR = 1 when this install makes $INSTDIR\DIR (or an earlier one into this same folder recorded
+; that it did), else 0
+!macro Made KEY DIR VAR
+  ReadRegStr $R0 HKLM "${UNINST}" "InstallLocation"
+  ReadRegDWORD ${VAR} HKLM "${UNINST}" "${KEY}"
+  ${If} $R0 != $INSTDIR
+  ${OrIf} ${VAR} != 1
+    ${If} ${FileExists} "$INSTDIR\${DIR}\*.*"
+      StrCpy ${VAR} 0
+    ${Else}
+      StrCpy ${VAR} 1
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TEXT "This puts obsmage ${VERSION} into the OBS Studio already on this computer: the obsmage-core plugin and two Python tools.$\r$\n$\r$\nThis installer is not signed, which is why Windows may have warned you. obsmage is free software from INPUTLOOP; its source is at https://github.com/inputloop/obsmage.$\r$\n$\r$\nClose OBS Studio before you continue."
 !insertmacro MUI_PAGE_WELCOME
@@ -116,6 +131,11 @@ Section "obsmage" SecMain
     Abort
   ${EndIf}
   DetailPrint "$Found"
+  ; which of OBS Studio's plugin folders this install makes (OBS 33 has none of them; 32 has all), so that the
+  ; uninstaller removes only those; a reinstall keeps what the first install recorded
+  !insertmacro Made MadeObsPlugins "obs-plugins" $R1
+  !insertmacro Made MadeObsPlugins64 "obs-plugins\64bit" $R2
+  !insertmacro Made MadeDataObsPlugins "data\obs-plugins" $R3
   SetOverwrite on
   SetOutPath "$INSTDIR\obs-plugins\64bit"
   File "${STAGE}\obs-plugins\64bit\obsmage-core.dll"
@@ -138,6 +158,9 @@ Section "obsmage" SecMain
   WriteRegStr HKLM "${UNINST}" "QuietUninstallString" '"$INSTDIR\${DATA}\uninstall-obsmage.exe" /S'
   WriteRegDWORD HKLM "${UNINST}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINST}" "NoRepair" 1
+  WriteRegDWORD HKLM "${UNINST}" "MadeObsPlugins" $R1
+  WriteRegDWORD HKLM "${UNINST}" "MadeObsPlugins64" $R2
+  WriteRegDWORD HKLM "${UNINST}" "MadeDataObsPlugins" $R3
 SectionEnd
 
 Function un.onInit
@@ -162,10 +185,19 @@ Section "Uninstall"
   RMDir "${UN_OBS}\${DATA}\tools"
   RMDir "${UN_OBS}\${DATA}\locale"
   RMDir "${UN_OBS}\${DATA}"
-  ; OBS Studio 33 has no obs-plugins\ or data\obs-plugins\ of its own; the installer made them, and only empty ones go
-  RMDir "${UN_OBS}\data\obs-plugins"
-  RMDir "${UN_OBS}\obs-plugins\64bit"
-  RMDir "${UN_OBS}\obs-plugins"
+  ; OBS Studio's plugin folders: only those the installer made (recorded in the Apps entry), and only when empty
+  ReadRegDWORD $0 HKLM "${UNINST}" "MadeDataObsPlugins"
+  ${If} $0 == 1
+    RMDir "${UN_OBS}\data\obs-plugins"
+  ${EndIf}
+  ReadRegDWORD $0 HKLM "${UNINST}" "MadeObsPlugins64"
+  ${If} $0 == 1
+    RMDir "${UN_OBS}\obs-plugins\64bit"
+  ${EndIf}
+  ReadRegDWORD $0 HKLM "${UNINST}" "MadeObsPlugins"
+  ${If} $0 == 1
+    RMDir "${UN_OBS}\obs-plugins"
+  ${EndIf}
   DeleteRegKey HKLM "${UNINST}"
 SectionEnd
 
