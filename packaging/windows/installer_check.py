@@ -5,7 +5,9 @@
     python installer_check.py refuses SETUP                silently into an empty folder that is not OBS Studio:
                                                            it must exit non-zero and write nothing there
     python installer_check.py installs SETUP ZIP OBS_DIR   silently, with no folder given: it must find OBS_DIR by
-                                                           itself, put every file of ZIP there byte for byte, and
+                                                           itself, put every file of ZIP there byte for byte (the
+                                                           zip is OBS's per-plugin layout; each name is moved to
+                                                           where the installer writes it: in_obs_dir), and
                                                            add a Settings > Apps entry naming OBS_DIR
     python installer_check.py uninstalls OBS_DIR FILE      the uninstaller, silently: OBS_DIR must be exactly as
                                                            FILE lists it, and the Apps entry gone
@@ -26,6 +28,21 @@ import zipfile
 
 UNINST = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\obsmage"
 UNINSTALLER = os.path.join("data", "obs-plugins", "obsmage-core", "uninstall-obsmage.exe")
+
+
+PLUGIN = "obsmage-core"
+
+
+def in_obs_dir(name):
+    """Where the installer writes a file the zip holds, relative to the OBS Studio folder; None for a name outside
+    the per-plugin layout. The zip: obsmage-core/obsmage-core.dll and obsmage-core/data/... (what OBS Studio 33 reads
+    from %ProgramData%\\obs-studio\\plugins\\). The installer: obs-plugins/64bit/ and data/obs-plugins/obsmage-core/."""
+    if name == PLUGIN + "/" + PLUGIN + ".dll":
+        return "obs-plugins/64bit/" + PLUGIN + ".dll"
+    head = PLUGIN + "/data/"
+    if name.startswith(head) and len(name) > len(head) and "/../" not in "/" + name + "/":
+        return "data/obs-plugins/" + PLUGIN + "/" + name[len(head):]
+    return None
 
 
 def apps_entry():
@@ -96,12 +113,16 @@ def installs(setup, zip_path, obs_dir):
     found = [("exits 0 with no folder given (exit %d)" % rc, rc == 0)]
     with zipfile.ZipFile(zip_path) as z:
         for name in sorted(n for n in z.namelist() if not n.endswith("/")):
-            p = os.path.join(obs_dir, *name.split("/"))
+            there = in_obs_dir(name)
+            if there is None:
+                found.append(("%s is in OBS's per-plugin layout" % name, False))
+                continue
+            p = os.path.join(obs_dir, *there.split("/"))
             got = None
             if os.path.isfile(p):
                 with open(p, "rb") as f:
                     got = hashlib.sha256(f.read()).hexdigest()
-            found.append(("%s, byte for byte" % name, got == hashlib.sha256(z.read(name)).hexdigest()))
+            found.append(("%s, as %s, byte for byte" % (name, there), got == hashlib.sha256(z.read(name)).hexdigest()))
     found.append(("the uninstaller is there", os.path.isfile(os.path.join(obs_dir, UNINSTALLER))))
     e = apps_entry()
     found.append(("an Apps entry naming %s (%s)" % (obs_dir, e and e.get("InstallLocation")), bool(e) and same_dir(e.get("InstallLocation"), obs_dir)))

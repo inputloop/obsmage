@@ -175,6 +175,28 @@ jobs:
           Get-Process obs64 -ErrorAction SilentlyContinue | Stop-Process -Force
           python packaging/windows/installer_check.py uninstalls "$env:OBS_DIR" "$env:RUNNER_TEMP\obs-before.txt"
           if ($LASTEXITCODE -ne 0) { throw "not held" }
+      - name: OBS Studio 33 loads the zip from %ProgramData%\obs-studio\plugins (a witness; 33 and later only)
+        if: ${{ !startsWith(matrix.obs, '32.') }}
+        continue-on-error: true
+        run: |
+          $root = "$env:ProgramData\obs-studio\plugins"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          Expand-Archive -Path (Get-ChildItem art\*.zip).FullName -DestinationPath $root -Force
+          if (-not (Test-Path "$root\obsmage-core\obsmage-core.dll")) { throw "the zip did not give $root\obsmage-core\obsmage-core.dll" }
+          if (Test-Path "$env:OBS_DIR\obs-plugins\64bit\obsmage-core.dll") { throw "a legacy copy is still in OBS Studio's folder" }
+          $logs = "$env:APPDATA\obs-studio\logs"
+          $since = Get-Date
+          $p = Start-Process -FilePath "$env:OBS_DIR\bin\64bit\obs64.exe" -WorkingDirectory "$env:OBS_DIR\bin\64bit" -ArgumentList '--verbose --multi --disable-updater --disable-shutdown-check' -PassThru
+          $deadline = (Get-Date).AddSeconds(120); $hit = $false
+          while ((Get-Date) -lt $deadline -and -not $p.HasExited) {
+            Start-Sleep -Seconds 2
+            $f = Get-ChildItem $logs -Filter *.txt -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $since } | Sort-Object LastWriteTime | Select-Object -Last 1
+            if ($f -and (Select-String -Path $f.FullName -Pattern '\[obsmage-core\] loaded' -Quiet)) { $hit = $true; break }
+          }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; Start-Sleep -Seconds 3 }
+          if ($f) { Select-String -Path $f.FullName -Pattern 'obsmage|legacy|ProgramData|Failed' | Select-Object -First 40 | ForEach-Object { $_.Line } }
+          Remove-Item -Recurse -Force "$root\obsmage-core"
+          if (-not $hit) { throw "OBS Studio did not log '[obsmage-core] loaded' from $root within 120 s" }
       - name: The installer checks can fail (a planted installer; prove-red)
         run: |
           python packaging/windows/installer_check.py --prove-red (Get-ChildItem planted\*-setup.exe).FullName (Get-ChildItem planted\*.zip).FullName "$env:OBS_DIR" "$env:RUNNER_TEMP\obs-before.txt"

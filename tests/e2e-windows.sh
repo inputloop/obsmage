@@ -4,6 +4,9 @@
 # grep and awk; tests/windows_pe_check.pl (Perl) is the second witness, reading the DLL itself. What only Windows
 # can show (the installer finds OBS Studio or refuses a folder, libobs loads the plugin, the uninstaller cleans
 # up) is checked on a Windows runner by .github/workflows/windows.yml.
+# The zip is in OBS's per-plugin layout (obsmage-core/obsmage-core.dll, obsmage-core/data/...; W13); the installer
+# writes the same files into the OBS Studio folder. The zip is unpacked into that folder's layout before W4-W11
+# compare it with the installer.
 #   sh tests/e2e-windows.sh               run the checks
 #   sh tests/e2e-windows.sh --prove-red   plant a fault in a copy of packaging/; each must turn its check red
 # Needs git cmake make zip unzip 7z perl python3 makensis and MinGW-w64 (gcc, dlltool, objdump); without them it
@@ -18,7 +21,7 @@ if [ "${1:-}" = --prove-red ]; then
   t=$(mktemp -d); bad=0
   WIN_OBS_CACHE=${WIN_OBS_CACHE:-$t/obs-headers}; export WIN_OBS_CACHE
   # each check alone, nothing planted, must be green; else a plant could "go red" for some other reason
-  for c in W1 W2 W3 W4 W5 W6 W7 W8 W9 W10 W11 W12; do
+  for c in W1 W2 W3 W4 W5 W6 W7 W8 W9 W10 W11 W12 W13; do
     ONLY=$c sh "$0" > "$t/log" 2>&1 || { echo "BASELINE RED  $c alone, nothing planted ($(grep -m1 '^RED' "$t/log" | cut -c1-80))"; bad=1; }
   done
   [ $bad = 0 ] && echo "baseline      each check alone is green with nothing planted"
@@ -30,7 +33,7 @@ if [ "${1:-}" = --prove-red ]; then
     if [ $? = 0 ]; then echo "STAYED GREEN  $1"; bad=1; else echo "went red      $1  ($(grep -m1 '^RED' "$t/log" | cut -c1-80))"; fi
   }
   plant "the name takes the clock"                windows/omg-win      's/^name=obsmage-\$version-\$stamp-/name=obsmage-$version-$(date +%s)-/'  W1
-  plant "the zip and the installer differ"        windows/omg-win      's#^(cd "\$S" && find#echo >> "$D/README-windows.txt"; &#'             W4
+  plant "the zip and the installer differ"        windows/omg-win      's#^(cd "\$Z" && find#echo >> "$ZP/data/README-windows.txt"; &#'    W4
   plant "a .def name OBS does not export"         windows/obs.def      '$s/$/\n  obs_no_such_export/'                                        W10
   plant "secret scan skipped"                     windows/omg-win      's#^OMG_TOOLS=\$TMP/src/tools "\$PY"#true || &#'                      W8
   plant "a staged file left out of the installer" windows/obsmage.nsi  '/^  File "\${STAGE}\\\${DATA}\\locale\\en-US.ini"$/d'                 W5
@@ -45,6 +48,8 @@ if [ "${1:-}" = --prove-red ]; then
   plant "import library names another DLL (perl)" windows/obs.def      's/^LIBRARY obs\.dll$/LIBRARY libobs.dll/'                            W11
   plant "a version disagreement built anyway"     windows/omg-win      's/^\[ "\$cver" = "\$version" \] || die/[ "$cver" = "$version" ] || true/' W7
   plant "OBS headers at another commit trusted"   windows/omg-win      's/^if \[ "\$have" != "\$OBS_COMMIT" \]; then$/if false; then/'       W12
+  plant "the zip's DLL under bin/64bit (legacy)"  windows/omg-win      's#cp "\$S/obs-plugins/64bit/obsmage-core.dll" "\$ZP/"#mkdir -p "$ZP/bin/64bit" \&\& cp "$S/obs-plugins/64bit/obsmage-core.dll" "$ZP/bin/64bit/"#' W13
+  plant "the zip in the OBS-folder layout"        windows/omg-win      's#^(cd "\$Z" && find#(cd "$S" \&\& find#'                         W13
   rm -rf "$t"
   [ $bad = 0 ] && echo "PROVE-RED OK" || { echo "PROVE-RED FAILED"; exit 1; }
   exit 0
@@ -76,8 +81,17 @@ pin=$(sed -n 's/^OBS_COMMIT=//p' "$PKG/windows/pins.env")
 P=$T/a/public; exe=$P/$name-setup.exe; zip=$P/$name.zip
 
 build "$SRC" "$rev" "$T/a"; rc=$?
-mkdir -p "$T/z" "$T/n"
-unzip -q "$zip" -d "$T/z" 2>/dev/null; 7z x -y -o"$T/n" "$exe" >/dev/null 2>&1
+mkdir -p "$T/zr" "$T/z" "$T/n"
+unzip -q "$zip" -d "$T/zr" 2>/dev/null; 7z x -y -o"$T/n" "$exe" >/dev/null 2>&1
+(cd "$T/zr" && find . -type f | sed 's#^\./##' | LC_ALL=C sort) > "$T/zr.list"
+# the zip's per-plugin layout, put the way the installer puts it: <name>/<name>.dll to obs-plugins/64bit/,
+# <name>/data/ to data/obs-plugins/<name>/; anything else stays out (W13 says so)
+if [ -f "$T/zr/obsmage-core/obsmage-core.dll" ]; then
+  mkdir -p "$T/z/obs-plugins/64bit" && cp -p "$T/zr/obsmage-core/obsmage-core.dll" "$T/z/obs-plugins/64bit/"
+fi
+if [ -d "$T/zr/obsmage-core/data" ]; then
+  mkdir -p "$T/z/data/obs-plugins/obsmage-core" && cp -Rp "$T/zr/obsmage-core/data/." "$T/z/data/obs-plugins/obsmage-core/"
+fi
 (cd "$T/z" && find . -type f | LC_ALL=C sort) > "$T/z.list"
 (cd "$T/n" && find . -type f ! -path './$PLUGINSDIR/*' ! -name uninstall-obsmage.exe | LC_ALL=C sort) > "$T/n.list"
 dll=$T/z/obs-plugins/64bit/obsmage-core.dll
@@ -192,6 +206,22 @@ if want W12; then
   WIN_OBS_CACHE=$C build "$SRC" "$rev" "$T/o12"; rc=$?
   [ $rc = 0 ] && grep -q 'fetching again' "$T/o12/work/win.log" && [ "$(git -C "$C/$pin" rev-parse HEAD 2>/dev/null)" = "$pin" ] \
     && ok "W12 OBS headers at another commit than the pin are fetched again, at the pin" || red "W12 OBS headers at another commit than the pin (rc=$rc)"
+fi
+
+if want W13; then
+  # OBS Studio 33, frontend/plugin-manager/PluginModuleLoader_Windows.cpp: <Root Path>/obs-studio/plugins/<Plugin>/<Plugin>.dll
+  # and .../<Plugin>/data; .../<Plugin>/bin/64bit/ and the OBS folder's obs-plugins/64bit/ are its legacy paths
+  b=
+  [ -s "$T/zr.list" ] || b="$b the zip is empty or unreadable;"
+  grep -v '^obsmage-core/' "$T/zr.list" | grep -q . && b="$b outside obsmage-core/: $(grep -v '^obsmage-core/' "$T/zr.list" | head -n 1);"
+  for f in obsmage-core/obsmage-core.dll obsmage-core/data/locale/en-US.ini obsmage-core/data/README-windows.txt; do
+    grep -qx "$f" "$T/zr.list" || b="$b no $f;"
+  done
+  grep -E '\.dll$' "$T/zr.list" | grep -vqx 'obsmage-core/obsmage-core.dll' && b="$b a DLL elsewhere: $(grep -E '\.dll$' "$T/zr.list" | grep -vx 'obsmage-core/obsmage-core.dll' | head -n 1);"
+  grep -Eq '(^|/)(bin|64bit|obs-plugins)/' "$T/zr.list" && b="$b a legacy folder: $(grep -E '(^|/)(bin|64bit|obs-plugins)/' "$T/zr.list" | head -n 1);"
+  grep -v '^obsmage-core/obsmage-core\.dll$' "$T/zr.list" | grep -vq '^obsmage-core/data/' && b="$b beside the DLL, not in data/: $(grep -v '^obsmage-core/obsmage-core\.dll$' "$T/zr.list" | grep -v '^obsmage-core/data/' | head -n 1);"
+  [ -z "$b" ] && ok "W13 the zip is OBS's per-plugin layout: obsmage-core/obsmage-core.dll and obsmage-core/data/ ($(wc -l < "$T/zr.list") files), ready for %ProgramData%\\obs-studio\\plugins\\" \
+    || red "W13 the zip is OBS's per-plugin layout:$b"
 fi
 
 echo "e2e-windows: $pass ok, $fail RED"

@@ -166,5 +166,32 @@ class WindowsVaultLock(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(tmp, "v.kv")))
 
 
+class ZipLayout(unittest.TestCase):
+    """The Windows zip is OBS Studio 33's per-plugin layout (frontend/plugin-manager/PluginModuleLoader_Windows.cpp:
+    <Root Path>/obs-studio/plugins/<Plugin>/<Plugin>.dll and .../<Plugin>/data). installer_check.in_obs_dir is how
+    the Windows CI finds each zip file where the installer wrote it; it must take only that layout. The sh witness
+    is tests/e2e-windows.sh W13, which reads a real built zip."""
+
+    def test_in_obs_dir(self):
+        sys.path.insert(0, os.path.join(TOP, "packaging", "windows"))
+        try:
+            import installer_check as ic
+        finally:
+            sys.path.pop(0)
+        cases = {
+            "obsmage-core/obsmage-core.dll": "obs-plugins/64bit/obsmage-core.dll",
+            "obsmage-core/data/locale/en-US.ini": "data/obs-plugins/obsmage-core/locale/en-US.ini",
+            "obsmage-core/data/tools/omg_atoms.py": "data/obs-plugins/obsmage-core/tools/omg_atoms.py",
+            "obsmage-core/bin/64bit/obsmage-core.dll": None,      # OBS 33 calls this legacy
+            "obs-plugins/64bit/obsmage-core.dll": None,           # the OBS-folder layout, also legacy
+            "obsmage-core/README-windows.txt": None,              # beside the DLL, not in data/
+            "obsmage-core/data/../../evil.dll": None,
+        }
+        if RED:  # planted fault: the legacy bin/64bit path is expected to be taken
+            cases["obsmage-core/bin/64bit/obsmage-core.dll"] = "obs-plugins/64bit/obsmage-core.dll"
+        for name, want in cases.items():
+            self.assertEqual(ic.in_obs_dir(name), want, name)
+
+
 if __name__ == "__main__":
     unittest.main()

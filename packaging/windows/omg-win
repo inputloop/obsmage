@@ -1,9 +1,12 @@
 #!/bin/sh
 # omg-win -- obsmage for Windows x64, the shortest path. From one commit: the obsmage-core plugin cross-built with
-# MinGW-w64 against OBS Studio's own headers (pinned in pins.env), staged in the folder layout of an OBS Studio
-# install with the two Python tools and the licence texts, scanned for credentials, then packed two ways: an
-# unsigned NSIS installer that finds the person's OBS Studio (or lets them browse to it), and a zip of the same
-# tree. Each gets a .sha256 beside it. It stages; it does not publish, and it signs nothing.
+# MinGW-w64 against OBS Studio's own headers (pinned in pins.env), staged with the two Python tools and the licence
+# texts, scanned for credentials, then packed two ways: an unsigned NSIS installer that finds the person's OBS
+# Studio (or lets them browse to it) and writes into its folder (obs-plugins\64bit\ and data\obs-plugins\, which
+# OBS 33 calls legacy), and a zip of the same files in OBS's per-plugin layout, one folder to drop into
+# %ProgramData%\obs-studio\plugins\ (OBS 33 and later):
+#   obsmage-core/obsmage-core.dll    obsmage-core/data/...   (frontend/plugin-manager/PluginModuleLoader_Windows.cpp)
+# Each gets a .sha256 beside it. It stages; it does not publish, and it signs nothing.
 #
 #   omg-win [-v] [-n]         -v say what happens   -n only say what would be built
 # Settings (environment, all optional):
@@ -126,10 +129,16 @@ cp "$TMP/src/COPYING" "$TMP/src/COPYING.LESSER" "$D/" || die "could not stage th
 sed -e "s/@VERSION@/$version/g" -e "s/@REVISION@/$rev/g" -e "s/@OBS_TAG@/$OBS_TAG/g" -e "s/@OBS_COMMIT@/$OBS_COMMIT/g" \
   -e "s/@SOURCE_TARBALL@/obsmage-$version-$stamp-$rev12.tar.gz/g" "$here/README-windows.txt" > "$D/README-windows.txt" || die "could not write README-windows.txt"
 if grep -q '@[A-Z_]*@' "$D/README-windows.txt"; then die "README-windows.txt has a placeholder omg-win does not fill"; fi
-find "$S" -type d -exec chmod 755 {} + && find "$S" -type f -exec chmod 644 {} + &&
-TZ=UTC find "$S" -exec touch -t "$touchstamp" {} + || die "could not set the stage's modes and times"
+# the zip's stage: the same files in OBS's per-plugin layout, <name>/<name>.dll and <name>/data/
+Z=$TMP/zipstage; ZP=$Z/obsmage-core
+mkdir -p "$ZP/data" && cp "$S/obs-plugins/64bit/obsmage-core.dll" "$ZP/" && cp -R "$D/." "$ZP/data/" ||
+  die "could not stage the zip's per-plugin layout"
+for x in "$S" "$Z"; do
+  find "$x" -type d -exec chmod 755 {} + && find "$x" -type f -exec chmod 644 {} + &&
+  TZ=UTC find "$x" -exec touch -t "$touchstamp" {} + || die "could not set the stage's modes and times"
+done
 
-# 6. the credential scan, on everything that will ship
+# 6. the credential scan, on everything that will ship (the zip's stage holds the same bytes; e2e-windows W4 checks)
 OMG_TOOLS=$TMP/src/tools "$PY" "$here/../dist/secret-scan.py" "$S" > "$TMP/scan.out" 2>&1 || die "secret-scan refused the bundle: $(head -n 3 "$TMP/scan.out" | tr '\n' ' ')"
 log "secret-scan: the stage is clean"
 
@@ -138,7 +147,7 @@ v4=$(printf %s "$version" | sed 's/[^0-9.].*//' | awk -F. '{ printf "%d.%d.%d.%d
 SOURCE_DATE_EPOCH=$ct makensis -V2 -INPUTCHARSET UTF8 -DVERSION="$version" -DVERSION4="$v4" -DREVISION="$rev" \
   -DSTAGE="$S" -DOUTFILE="$TMP/$name-setup.exe" "$here/obsmage.nsi" > "$WORK/makensis.log" 2>&1 || die "makensis failed (see $WORK/makensis.log)"
 [ -s "$TMP/$name-setup.exe" ] || die "makensis made no installer"
-(cd "$S" && find . -type f | sed 's#^\./##' | LC_ALL=C sort | TZ=UTC zip -X -D -q "$TMP/$name.zip" -@) || die "zip failed"
+(cd "$Z" && find . -type f | sed 's#^\./##' | LC_ALL=C sort | TZ=UTC zip -X -D -q "$TMP/$name.zip" -@) || die "zip failed"
 
 # 8. stage them, each with its .sha256; the same commit again must give the same bytes
 for f in "$name-setup.exe" "$name.zip"; do

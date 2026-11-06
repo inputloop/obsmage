@@ -134,10 +134,25 @@ shortest path puts obsmage into an OBS Studio the person already has; it does no
   plugin into the real `obs.dll`.
 - **Which OBS.** libobs refuses a module built for a newer major.minor, so a plugin built against 32.1
   loads in OBS Studio 32.1 and later. CI loads it in 32.1.0 and 33.0.1.
-- **Layout.** `obs-plugins\64bit\obsmage-core.dll` and `data\obs-plugins\obsmage-core\` (locale, `tools\`,
-  `COPYING`, `COPYING.LESSER`, `README-windows.txt`, the uninstaller) inside the OBS Studio folder. OBS 32
-  loads plugins from there; OBS 33 still does (its plugin manager calls it the legacy root path), though
-  its own plugins moved to `core\` and it prefers `%ProgramData%\obs-studio\plugins\<name>\` for others.
+- **Layout (installer).** `obs-plugins\64bit\obsmage-core.dll` and `data\obs-plugins\obsmage-core\` (locale,
+  `tools\`, `COPYING`, `COPYING.LESSER`, `README-windows.txt`, the uninstaller) inside the OBS Studio folder.
+  OBS 32 loads plugins from there; OBS 33 still does, but its Plugin Manager marks them "Legacy", and
+  obsproject's knowledge base says that folder is not loaded from OBS 34.0 on.
+- **Layout (zip, 2026-11-06).** OBS 33's per-plugin layout, one folder to drop into
+  `%ProgramData%\obs-studio\plugins\`: `obsmage-core\obsmage-core.dll` and `obsmage-core\data\` (the same
+  files as the installer's `data\obs-plugins\obsmage-core\`, less the uninstaller). The source is OBS 33.0.1's
+  `frontend/plugin-manager/PluginModuleLoader_Windows.cpp` (unchanged on master 7a25c3f): the Root Path is
+  `<ProgramData>/obs-studio/plugins/<Plugin>/<Plugin>.dll` with `.../<Plugin>/data`; its legacy paths are the
+  OBS folder's `obs-plugins/64bit/` and `ProgramData\...\<Plugin>\bin\64bit\`, the layout OBS 32 used
+  (32.1.0's `frontend/widgets/OBSBasic.cpp`, `AddExtraModulePaths`). OBS 32 does not read the flat layout,
+  so the zip is for OBS 33 and later and the installer stays as it was, for 32.1 and later. See also
+  https://obsproject.com/kb/legacy-plugin-developer-info. Checked by `tests/e2e-windows.sh` W13 (and its two
+  plants) and `tests/test_windows_py38.py` ZipLayout; on Windows, `installer_check.py installs` reads the
+  zip through `in_obs_dir`, and on OBS 33 the workflow drops the zip into ProgramData and starts OBS (a
+  witness, like the obs64.exe step).
+- **Not yet (the installer).** Writing to `%ProgramData%\obs-studio\plugins\obsmage-core\` on OBS 33 and
+  later, and removing an older copy from the OBS folder as it does, which the knowledge base asks of
+  installers. That needs the installer to tell OBS 32 from 33 (32 reads only `bin\64bit\` there).
 - **Finding OBS Studio.** The folder its installer records (`HKLM\SOFTWARE\OBS Studio`, 32-bit view, then
   64-bit), then `%ProgramFiles%\obs-studio`; otherwise the folder page says it was not found and the
   person browses. A folder without `bin\64bit\obs64.exe` is refused: in the wizard Next stays off;
