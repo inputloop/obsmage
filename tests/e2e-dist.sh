@@ -27,6 +27,7 @@ if [ "${1:-}" = --prove-red ]; then
   plant "feed written before its bundle (py)" 's/^for f in "\$name.tar.gz" \${debname:+"\$debname"}; do$/for f in ${debname:+"$debname"}; do/' py
   plant "retention keeps nothing (py)"        's/\[ \$n -gt "\$KEEP" \] || continue/[ $n -gt 0 ] || continue/' py
   plant "same commit staged again (sh)"       's/ && \[ \$FORCE = 0 \]; then say "nothing new/ \&\& false; then say "nothing new/' sh
+  plant "folders lose their search bit (sh)"  's#^find "\$PUB" -type f -exec chmod 644 {} + 2>/dev/null; find "\$PUB" -type d -exec chmod 755 {} +#chmod 644 "$PUB"/*; : #' sh
   plant "lock ignored (py)"                   's/^if ! mkdir "\$LOCK" 2>\/dev\/null; then/mkdir -p "$LOCK"; if false; then/' py
   rm -rf "$t"
   [ $bad = 0 ] && echo "PROVE-RED OK" || { echo "PROVE-RED FAILED"; exit 1; }
@@ -97,6 +98,12 @@ mkdir -p "$T/l/work/lock"; sleep 30 & sp=$!; echo $sp > "$T/l/work/lock/pid"
 run "$T/l"; rc=$?
 kill $sp 2>/dev/null; wait $sp 2>/dev/null
 [ $rc = 0 ] && [ ! -f "$T/l/public/channel.json" ] && grep -q 'skipped' "$T/l/work/dist.log" && ok "E9 a run in progress is not overlapped" || red "E9 a run in progress is not overlapped"
+
+# E10 a staged sub-folder (windows/) keeps its search bit when a run re-permissions the tree
+mkdir -p "$T/a/public/windows"; echo x > "$T/a/public/windows/README.txt"; chmod 755 "$T/a/public/windows"
+echo "v10" > "$O/NOTES"; commit v10 2026-11-02T20:00:00Z; run "$T/a"
+m=$(stat -c %a "$T/a/public/windows" 2>/dev/null); f=$(stat -c %a "$T/a/public/windows/README.txt" 2>/dev/null)
+[ "$m" = 755 ] && [ "$f" = 644 ] && ok "E10 a staged folder stays 755, its files 644" || red "E10 a staged folder stays 755, its files 644 (folder $m, file $f)"
 
 echo "e2e-dist: $pass ok, $fail RED"
 [ $fail = 0 ]

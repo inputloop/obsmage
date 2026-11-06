@@ -27,6 +27,8 @@ ALLOWED = {
     "https://github.com/inputloop/corwin.cloud", "https://github.com/inputloop/topology/tree/corwin",
     "https://github.com/inputloop/about-corwin", "https://corwin.cloud/", "https://obsproject.com/",
     "https://www.gnu.org/licenses/gpl-3.0.html",
+    # the "Drawn by" credits (2026-11-05): the shop's own pages for INPUTLOOP, Bryant and Corwin
+    "https://github.com/inputloop", "https://github.com/takushieternal", "https://aboutcorwin.com/", "mailto:corwin@bru.st",
 }
 PRIVATE = ["c4"]
 PAGES = ["index.html", "demo.html", "colophon.html", "jslicense.html", "404.html", "LICENSES/index.html"]
@@ -179,12 +181,24 @@ if "no topology staged" not in tp:
     check("connect-src 'self'" in pol and not re.search(r"https?:", pol), "topology may fetch from this origin only")
     check("'unsafe-eval'" not in pol, "topology's policy allows no eval")
 
+# 6b. every page credits "Drawn by" INPUTLOOP, Bryant and Corwin, each a link, and names a human to write to
+for rel in PAGES:
+    if rel not in pages:
+        continue
+    t = read(os.path.join(PUB, rel))
+    m = re.search(r'Drawn by</span><span class="tb-v">(.*?)</span>', t, re.S)
+    cell = m.group(1) if m else ""
+    for name, url in (("INPUTLOOP", "https://github.com/inputloop"), ("Bryant", "https://github.com/takushieternal"), ("Corwin", "https://aboutcorwin.com/")):
+        check('<a href="%s">%s</a>' % (url, name) in cell, "%s: Drawn by links %s" % (rel, name))
+    check("Corwin Brust" in t and 'href="mailto:corwin@bru.st"' in t, "%s: a human is named, with a way to write" % rel)
+
 # 7. releases follow site.conf, one line
 rel = read(os.path.join(GEN, "releases.conf"))
 index = read(os.path.join(PUB, "index.html"))
 if OPEN:
     check("alias /var/lib/obsmage-dist/public/;" in rel and "location ^~ /dist/" in rel, "releases open: nginx maps /dist/ to the staged bundles")
     check('href="dist/channel.json"' in index, "releases open: the page links the channel feed")
+    check('href="dist/windows/"' in index and "Windows" in index, "releases open: the page names the Windows folder and says what is in it")
 else:
     check("location" not in rel, "releases closed: nothing is mapped at /dist/")
     check("dist/" not in index and "Releases open when the project does" in index, "releases closed: the page links no bundle and says why")

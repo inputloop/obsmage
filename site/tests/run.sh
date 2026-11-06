@@ -45,6 +45,8 @@ label="an inline style";                 pub; sedi "$T/pub/colophon.html" 's#<h1
 label="a private repository's address";  pub; sedi "$T/pub/index.html" 's#</main>#<a href="https://github.com/inputloop/c4">c4</a></main>#'; static
 label="a script without its label";      pub; sedi "$T/pub/js/front.js" '1d'; static
 label="a script without its licence row"; pub; sedi "$T/pub/jslicense.html" 's#href="js/demo.js"#href="js/demo.jsx"#g'; static
+label="a credit link lost (Drawn by)";   pub; sedi "$T/pub/colophon.html" 's#<a href="https://github.com/takushieternal">Bryant</a>#Bryant#'; static
+label="no human to write to";            pub; sedi "$T/pub/404.html" 's#Corwin Brust#The team#'; static
 label="a broken internal link";          pub; sedi "$T/pub/index.html" 's#href="demo.html"#href="demo2.html"#'; static
 label="a script that phones home";       pub; sedi "$T/pub/js/front.js" 's#if (!f) return;#if (!f) return; fetch("/x");#'; static
 label="the demo's sample not the sample"; pub; sedi "$T/pub/demo.html" 's#Sample Studio#Sample Stuido#'; static

@@ -46,7 +46,12 @@ PUBLIC = {
     "about-corwin": "https://github.com/inputloop/about-corwin",
     "corwin.cloud site": "https://corwin.cloud/",
     "obs": "https://obsproject.com/",
+    # who drew the sheets (links as the shop's own pages give them: about-corwin's content/ names Bryant's page)
+    "inputloop": "https://github.com/inputloop",
+    "bryant": "https://github.com/takushieternal",
+    "corwin": "https://aboutcorwin.com/",
 }
+CONTACT = "corwin@bru.st"
 PRIVATE_NAMES = ["c4"]   # still private: named, never linked (check_site.py fails on an address for one)
 
 
@@ -180,15 +185,21 @@ def nav(here):
 
 
 def foot(rev, day):
-    cells = [("Project", "obsmage"), ("Sheet", "obsmage.com"), ("Drawn by", "its own toolchain"),
-             ("Revision", rev), ("Built", day)]
-    block = "".join('<div class="tb-cell"><span class="tb-k">%s</span><span class="tb-v">%s</span></div>' % (e(k), e(v)) for k, v in cells)
+    # Drawn by: INPUTLOOP, Bryant and Corwin, each a link (Corwin's rule of 2026-11-05). The human who most
+    # recently drove a change goes first: every commit in the history is authored by Corwin, so Corwin first;
+    # then INPUTLOOP, then Bryant. The same order on every page (the shallow history cannot say more per page).
+    drawn = " · ".join('<a href="%s">%s</a>' % (PUBLIC[k], n) for k, n in
+                       (("corwin", "Corwin"), ("inputloop", "INPUTLOOP"), ("bryant", "Bryant")))
+    cells = [("Project", e("obsmage")), ("Sheet", e("obsmage.com")), ("Drawn by", drawn),
+             ("Revision", e(rev)), ("Built", e(day))]
+    block = "".join('<div class="tb-cell"><span class="tb-k">%s</span><span class="tb-v">%s</span></div>' % (e(k), v) for k, v in cells)
     return ('<footer class="foot"><div class="titleblock" aria-label="About this page">%s</div>'
             '<p class="foot-line">Free software. Copyright 2026 INPUTLOOP; code GPL-3.0-or-later OR LGPL-3.0-or-later, words CC-BY-SA-4.0. '
             '<a href="colophon.html">Colophon and credits</a> · <a href="jslicense.html" data-jslicense="1">JavaScript licences</a> · '
+            'Ideas, or something you do not like: write to Corwin Brust, <a href="mailto:%s">%s</a> · '
             '<span class="theme-pick js-only">Theme: <button type="button" data-theme-set="auto">auto</button> '
             '<button type="button" data-theme-set="light">light</button> <button type="button" data-theme-set="dark">dark</button></span></p>'
-            '</footer>\n</body>\n</html>\n' % block)
+            '</footer>\n</body>\n</html>\n' % (block, CONTACT, CONTACT))
 
 
 def releases_section(conf):
@@ -198,7 +209,12 @@ def releases_section(conf):
                 '<a href="dist/SHA256SUMS">SHA256SUMS</a> lists every file; <a href="dist/">all releases</a>. '
                 'Every bundle is checked for credentials before it is served.</p>'
                 '<p class="hint">Check before you install: <code>sha256sum -c SHA256SUMS</code>. The packages are not signed yet; '
-                'a signature will sit beside each one when they are. The source: <a href="%s">inputloop/obsmage</a>.</p>' % PUBLIC["obsmage"])
+                'a signature will sit beside each one when they are. The source: <a href="%s">inputloop/obsmage</a>.</p>'
+                '<h3>Windows</h3><p><a href="dist/windows/">dist/windows/</a> holds an unsigned preview for Windows (x64), built 2026-11-04: '
+                'an installer that adds the obsmage plugin and the two Python tools to an OBS Studio you already have (32.1 or newer), '
+                'the same files as a zip to place by hand, and the source of exactly that build as a tarball, each with its sha256. '
+                'The plugin only writes a line to OBS\'s log so far. Windows will warn that it is not signed; check the sha256 first. '
+                'Its notes are in the folder (<code>README.txt</code>). When a newer Windows build ships, it will sit in the same folder beside its own source.</p>' % PUBLIC["obsmage"])
     else:
         body = ('<p><strong>Releases open when the project does.</strong> The pipeline already runs: every build makes a '
                 'versioned source tarball and a Debian package, each with its sha256, named in one channel feed. '
@@ -211,7 +227,7 @@ def page_index(conf, facts, have_topology, rev, day):
     c = facts["counts"]
     first = "topology/topoforge/index.html?load=/drawings/obsmage.json"
     if have_topology:
-        stage = ('<div class="stage-app"><iframe id="topology" class="topology" loading="lazy" title="The obsmage drawing, in topology forge" '
+        stage = ('<div class="stage-app"><iframe id="topology" class="topology" loading="lazy" title="The obsmage drawing, in INPUTLOOP Draw" '
                  'src="%s&amp;embed=bare,ready"></iframe>'
                  '<p class="hint stage-note">Drag to move about, scroll to zoom, click a part for what it does. '
                  '<a href="%s">Open it full size</a>, where every shape can be moved, changed and saved.</p></div>' % (e(first, quote=True), e(first, quote=True)))
@@ -249,7 +265,7 @@ def page_index(conf, facts, have_topology, rev, day):
             'joined back, identical (counted by omg_atoms.py when this page was built, %s).</figcaption></figure></section>\n'
             % (split_demo, atom_demo, secret_line, facts["atoms"], len(facts["files"]), c["secret"], day) +
             '<section class="sec stage" id="picture" aria-labelledby="pic-h"><h2 id="pic-h">The picture</h2>'
-            '<p class="lede">How the parts fit, drawn in topology forge, the same drawing app that opens corwin.cloud.</p>'
+            '<p class="lede">How the parts fit, drawn in INPUTLOOP Draw, the same drawing app that opens corwin.cloud.</p>'
             '%s<figure class="flowfig">%s<figcaption class="hint">OBS writes its files; obsmage splits them into atoms; '
             'the composer and the healer work from the atoms; releases come out of the healer\'s builds.</figcaption></figure></section>\n'
             % (stage, flow_svg(conf)) +
@@ -326,7 +342,7 @@ def page_colophon(rev, day):
     rows = [
         ("obsmage", "the atom layer, the composer, the healer and this site", "INPUTLOOP (Corwin Brust and Bryant Frankford)",
          "code GPL-3.0-or-later OR LGPL-3.0-or-later; words CC-BY-SA-4.0", PUBLIC["obsmage"]),
-        ("topology forge (formerly TopoForge)", "the drawing app on the front page", "Bryant Frankford, for Corwin; carried on in topology",
+        ("INPUTLOOP Draw (topology; formerly TopoForge)", "the drawing app on the front page", "Bryant Frankford, for Corwin; carried on in topology",
          "GPL-3.0-or-later OR LGPL-3.0-or-later", PUBLIC["topology"]),
         ("corwin.cloud", "the way this site is built and deployed", "INPUTLOOP", "GPL-3.0-or-later OR LGPL-3.0-or-later", PUBLIC["corwin.cloud"]),
         ("about-corwin", "the shape of the release channel feed", "Corwin Brust and contributors", "GPL-3.0-or-later", PUBLIC["about-corwin"]),

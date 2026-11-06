@@ -137,7 +137,8 @@ art=$name.tar.gz; [ -n "$BASE" ] && art=$BASE/$name.tar.gz
 mv -f "$PUB/.$name.json.part" "$PUB/$name.json"
 (cd "$PUB" && ls -1 | grep -E '^obsmage[-_].*\.(tar\.gz|deb|json)$' | LC_ALL=C sort | while read -r f; do sumc "$f"; done) > "$PUB/.SHA256SUMS.part" && mv -f "$PUB/.SHA256SUMS.part" "$PUB/SHA256SUMS"
 cp "$PUB/$name.json" "$PUB/.channel.json.part" && mv -f "$PUB/.channel.json.part" "$PUB/channel.json"   # last: no reader sees a feed before its bundles
-chmod 644 "$PUB"/* 2>/dev/null
+# files 644, folders 755: a folder given 644 (a staged windows/ was) has no search bit, so nginx answers 403 inside it
+find "$PUB" -type f -exec chmod 644 {} + 2>/dev/null; find "$PUB" -type d -exec chmod 755 {} + 2>/dev/null
 printf '%s %s %s %s\n' "$stamp" "$rev12" "$key" "$sha" >> "$WORK/history.log"
 log "staged $name ($size bytes, sha256 $(printf %s "$sha" | cut -c1-12)...)${debname:+ and $debname}"
 
