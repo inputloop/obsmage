@@ -46,10 +46,8 @@ PUBLIC = {
     "about-corwin": "https://github.com/inputloop/about-corwin",
     "corwin.cloud site": "https://corwin.cloud/",
     "obs": "https://obsproject.com/",
-    # who drew the sheets (links as the shop's own pages give them: about-corwin's content/ names Bryant's page)
+    # who drew the sheets: INPUTLOOP, where both makers are found (see foot() for why only it is linked)
     "inputloop": "https://github.com/inputloop",
-    "bryant": "https://github.com/takushieternal",
-    "corwin": "https://aboutcorwin.com/",
 }
 CONTACT = "corwin@bru.st"
 PRIVATE_NAMES = ["c4"]   # still private: named, never linked (check_site.py fails on an address for one)
@@ -185,11 +183,13 @@ def nav(here):
 
 
 def foot(rev, day):
-    # Drawn by: INPUTLOOP, Bryant and Corwin, each a link (Corwin's rule of 2026-11-05). The human who most
-    # recently drove a change goes first: every commit in the history is authored by Corwin, so Corwin first;
-    # then INPUTLOOP, then Bryant. The same order on every page (the shallow history cannot say more per page).
-    drawn = " · ".join('<a href="%s">%s</a>' % (PUBLIC[k], n) for k, n in
-                       (("corwin", "Corwin"), ("inputloop", "INPUTLOOP"), ("bryant", "Bryant")))
+    # Drawn by: Corwin and Bryant, at INPUTLOOP.  Corwin, 2026-11-06 01:20: "when INPUTLOOP and names are near each
+    # other EITHER inputloop or the names should link but it may not need to be both ... Does it make it seem
+    # agrandizing to include them?  Does it make it seem like we are hiding not to?"  Here INPUTLOOP alone is a
+    # link: the project lives there and both makers are found there; the colophon names each in full, and the
+    # foot line names Corwin with a way to write.  Three links side by side in a small title block read as a
+    # banner; the names plain, joined by "and", read as people.  Corwin first: he has driven every change.
+    drawn = 'Corwin and Bryant, at <a href="%s">INPUTLOOP</a>' % PUBLIC["inputloop"]
     cells = [("Project", e("obsmage")), ("Sheet", e("obsmage.com")), ("Drawn by", drawn),
              ("Revision", e(rev)), ("Built", e(day))]
     block = "".join('<div class="tb-cell"><span class="tb-k">%s</span><span class="tb-v">%s</span></div>' % (e(k), v) for k, v in cells)
